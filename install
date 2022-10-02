@@ -49,32 +49,31 @@ print_line() {
 	printf "%${len}s\n" | tr " " "="
 }
 
-# В случае если не были введены данные токена
-! [ -f ./.conf ] && {
-	macbook=''; read_value "Введите имя вашего макбука" macbook
-	max=''; read_value "Введите верхний порог зарядки макбука" max
-	min=''; read_value "Введите нижний порог разрядки макбука" min
-	token=''; read_value "Введите token Телеграм бота" token
-	id=''; read_value "Введите id диалога в Телеграм боте" id
-	period=''; read_value "Введите период опроса состояния батареи" period digit
-	print_line
-	echo -n 'Установка пакета macbat завершена                '
+mb_file=./macbat
 
-	echo "token=${token}" > ./.conf
-	echo "id=${id}" >> ./.conf
-	echo "notebook_name=${macbook}" >> ./.conf
-	echo "max=${max}" >> ./.conf
-	echo "min=${min}" >> ./.conf
+[ -f "${mb_file}" ] && {
+        macbook=''; read_value "Введите имя вашего макбука" macbook
+        max=''; read_value "Введите верхний порог зарядки макбука" max
+        min=''; read_value "Введите нижний порог разрядки макбука" min
+        token=''; read_value "Введите token Телеграм бота" token
+        id=''; read_value "Введите id диалога в Телеграм боте" id
+        period=''; read_value "Введите период опроса состояния батареи" period digit
+        print_line
+        echo -n 'Установка пакета macbat завершена                '
 
-	cron_file=./crontab.tmp
-   	crontab -l > ${cron_file}
-	sed -i -e '/macbat/d' ${cron_file}
-	echo "*/${period}    *    *   *   *    $(pwd)/macbat &" >> ${cron_file}
-	crontab < "${cron_file}"
-	rm ${cron_file}
+        sed -i -e "s/^\(token=\).*/\1${token}/" ${mb_file}
+        sed -i -e "s/^\(id=\).*/\1${id}/" ${mb_file}
+        sed -i -e "s/^\(max=\).*/\1${max}/" ${mb_file}
+        sed -i -e "s/^\(min=\).*/\1${min}/" ${mb_file}
+        sed -i -e "s/^\(notebook_name=\).*/\1${macbook}/" ${mb_file}
 
-	[ $? = 0 ] && echo 'УСПЕШНО' || echo 'С ОШИБКАМИ'
-	print_line
+        cron_file=./crontab.tmp
+        crontab -l > ${cron_file}
+        sed -i -e '/macbat/d' ${cron_file}
+        echo "*/${period}    *    *   *   *    $(pwd)/macbat &" >> ${cron_file}
+        crontab < "${cron_file}"
+        rm ${cron_file}
 
+        [ $? = 0 ] && echo 'УСПЕШНО' || echo 'С ОШИБКАМИ'
+        print_line
 }
-
