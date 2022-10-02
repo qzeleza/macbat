@@ -1,0 +1,11 @@
+#!/usr/bin/env zsh
+
+echo -n 'Удаление пакета macbat прошло          '
+cron_file=./crontab.tmp
+crontab -l > ${cron_file}
+sed -i -e '/macbat/d' ${cron_file}
+crontab < "${cron_file}"
+rm ${cron_file}
+rm -rf ../macbat/
+[ $? = 0 ] && echo 'УСПЕШНО' || echo 'С ОШИБКАМИ'
+
