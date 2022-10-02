@@ -1,0 +1,124 @@
+#!/bin/zsh
+# Файл в котором хранится токен и id диалога в telegram в который будут отправляться сообщения 
+. ./bc.conf
+
+# имя устройства
+notebook_name=macosh
+# пороги зарядки и разрядки батареи
+max=80; min=20
+
+#-----------telegram----------------------------------
+nl="%0A"
+url="https://api.telegram.org/bot${token}/sendMessage"
+#----------------------------------------------------
+send_mess(){
+	curl -s -X POST ${url} -d chat_id=${id} -d text="${1}" -d parse_mode="HTML"
+}
+
+#-----------battery-----------------------------------
+mess_max="<code>Отключите ноутбук ${nl}<b>${notebook_name}</b> от зарядки.</code>${nl}Заряд батареи достиг <b>${max}%</b>"
+mess_min="<code>Зарядите ноутбук <b>${notebook_name}</b></code>.${nl}Заряд батареи снизился до <b>${min}%</b>"
+log_file=/private/tmp/.battery_check
+
+! [ -f "${log_file}" ] && touch "${log_file}"
+#----------------------------------------------------
+
+battery_power(){
+	/usr/sbin/system_profiler SPPowerDataType | grep 'State of Charge (%):' | cut -d':' -f2| tr -d ' '
+}
+
+#----------------------------------------------------
+charging_state(){
+	/usr/sbin/system_profiler SPPowerDataType | grep 'Charging:' | head -1 | cut -d':' -f2| tr -d ' '
+}
+
+#----------------------------------------------------
+show_time(){
+       awk -v t="${1}" 'BEGIN{t=int(t*1000); printf "%02d:%02d:%02d\n", t/3600000, t/60000%60, t/1000%60}'
+}
+#----------------------------------------------------
+#set -x
+
+watch_limits(){
+
+	cur_power=$(battery_power)
+	charge_status=$(charging_state)
+
+	if ! cat < "${log_file}" | grep -q mess_was_sent ; then
+		if [ "${cur_power}" -ge "${max}" ] ; then
+			send_mess "${mess_max}"
+			echo mess_was_sent >> "${log_file}"
+		elif [ "${cur_power}" -le "${min}" ] ; then
+			send_mess "${mess_min}"
+			echo mess_was_sent >> "${log_file}"
+		fi
+	else
+		if [[ "${cur_power}" -lt "${max}" ]] && [[ "${cur_power}" -gt "${min}" ]] ; then
+			sed -i -x "/mess_was_sent/d" "${log_file}"
+		fi
+	fi
+}
+
+get_config_value(){
+	cat < "${log_file}" | grep "${1}" | cut -d':' -f2
+}
+
+
+show_charge_time(){
+
+	now=$(date "+%s"); mess=''
+	#  В случае, если батарея не заряжалась
+	if [ "${charge_status}" = No ]; then
+		# Сообщаем сколько времени устройство заряжалось
+		if cat < "${log_file}" | grep -q charge_timer_start; then
+			start_charge_power=$(get_config_value charge_power_start)
+			start_charge_timer=$(get_config_value charge_timer_start)
+			diff_charge_timer=$((now - start_charge_timer))
+			diff_power=$((cur_power-start_charge_power))
+			time=$(show_time "${diff_charge_timer}")
+
+			mess="Заряд <b>${start_charge_power}% -> ${cur_power}% = ${diff_power}%</b>${nl} \
+Длительность <code>${time}</code>${nl} \
+Заряд на 10% занял $((diff_charge_timer/diff_power/6)) мин."
+
+			sed -i -x "/charge_timer_start/d" "${log_file}"
+			sed -i -x "/charge_power_start/d" "${log_file}"
+		fi
+		# Фиксируем данные при смене режима - начало работы на зарядке батареи
+		if ! cat < "${log_file}" | grep -q work_timer_start; then
+			echo "work_timer_start:${now}" >> "${log_file}"
+			echo "work_power_start:${cur_power}" >> "${log_file}"
+			mess_off="${nl}Отключено при <b>${cur_power}%</b>"
+		fi
+	else
+		# Сообщаем сколько устройство заряжалось
+		if cat < "${log_file}" | grep -q work_timer_start; then
+			start_work_power=$(get_config_value work_power_start)
+			start_work_timer=$(get_config_value work_timer_start)
+			diff_work_timer=$((now - start_work_timer))
+			diff_power=$((start_work_power-cur_power))
+			time=$(show_time "${diff_work_timer}")
+
+			mess_time="Разряд: <b>${start_work_power}% -> ${cur_power}% = ${diff_power}%</b> \
+${nl}Длительность: <code>${time}</code> \
+${nl}Разряд на 10% занял $((diff_work_timer/diff_power/6)) мин."
+
+			sed -i -x "/work_timer_start/d" "${log_file}"
+			sed -i -x "/work_power_start/d" "${log_file}"
+			#send_mess "${mess_time}"
+			[ -n "${mess}" ] && mess="${mess}${nl}${nl}${mess_time}" || mess="${mess_time}"
+		fi
+                # Фиксируем данные при смене режима - включение зарядки
+                if ! cat < "${log_file}" | grep -q charge_timer_start ; then
+                        echo "charge_timer_start:${now}" >> "${log_file}"
+                        echo "charge_power_start:${cur_power}" >> "${log_file}"
+                        mess_start="Подключено при <b>${cur_power}%</b>"
+                        [ -n "${mess}" ] && mess="${mess}${nl}${mess_start}" || mess="${mess_start}"
+                fi
+	fi
+	[ -n "${mess}" ] && send_mess "${mess}"
+}
+
+watch_limits
+show_charge_time
+

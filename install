@@ -1,0 +1,73 @@
+#!/usr/bin/env zsh
+
+RED="\033[1;31m";
+GREEN="\033[1;32m";
+BLUE="\033[36m";
+YELLOW="\033[33m";
+NOCL="\033[m";
+
+# ------------------------------------------------------------------------------------------
+#
+#	 Читаем значение переменной из ввода данных в цикле
+#	 $1 - заголовок для запроса
+#	 $2 - переменная в которой возвращается результат
+#	 $3 - тип вводимого значения
+#		 digit - цифра
+#		 password - пароль без показа вводимых символов
+#
+# ------------------------------------------------------------------------------------------
+read_value() {
+	header="$(echo "${1}" | tr -d '?')"
+	type="${3}"
+	while true; do
+		ready "${BLUE}${header}${NOCL} [Q-выход]"
+		if [ "${type}" = 'password' ]; then read -rs value; else read -r value; fi
+		if [ -z "${value}" ]; then
+				echo
+				print_line
+				echo -e "${RED}Данные не должны быть пустыми!"
+				echo -e "${GREEN}Попробуйте ввести значение снова...${NOCL}"
+				print_line
+		elif echo "${value}" | grep -qiE '^Q$' ; then
+				eval "${2}=q"
+				break
+		elif [ "${type}" = 'digit' ] && ! echo "${value}" | grep -qE '^[[:digit:]]{1,6}$'; then
+				echo
+				print_line
+				echo -e "${RED}Введенные данные должны быть цифрами!"
+				echo -e "${GREEN}Попробуйте ввести значение снова...${NOCL}"
+				print_line
+		elif [ "${type}" = 'password' ] && ! echo "${value}" | grep -qE '^[[:graph:]]{8,1024}$' ; then
+				echo
+				print_line
+				echo -e "${GREEN}Пароль должен содержать минимум 8 знаков."
+				echo -e "${RED}Попробуйте ввести его снова...${NOCL}"
+				print_line
+		else
+				eval "${2}=${value}"
+				break
+		fi
+	done
+}
+
+print_line() {
+	len=65
+	printf "%${len}s\n" | tr " " "="
+}
+
+# В случае если не были введены данные токена
+! [ -f ./.conf ] && {
+   token=''; read -r "Введите token Телеграм бота: " token
+   id=''; read -r "Введите id диалога в Телеграм боте: " id digit
+   period=''; read -r "Введите период опроса состояния батареи: " period digit
+   echo "token=${token}" > ./.conf
+   echo "id=${id}" > ./.conf
+   uid=$(whoami)
+   sudo su
+   sed -i -e '/macbat/d' /var/at/tabs/${uid}
+   echo "*/${period}    *    *   *   *    $(pwd)/macbat &" >>   /var/at/tabs/${uid}
+   exit
+   print_line
+   echo 'Установка пакета macbat завершена!'
+   print_line
+}
