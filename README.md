@@ -11,33 +11,47 @@ cd macbat
 echo "telegramToken=<Ваш telegram Token>" > ./telegram.conf
 echo "telegramChatId=<Ваш telegram ChatId>" >> ./telegram.conf
 ./macbat.run on
+
+# перегружаем ноутбук и удаляем кеш в launchctl
+sudo launchctl reboot gui/$UID
 ```
 
-> Скрипт установит в автозагрузку `AppleScript` скрипт `macbat.scpt` при помощи `com.macbat.plist`. 
+> Скрипт установит в автозагрузку скрипт `macbat.run` при помощи `com.macbat.plist`.
 
-## Установка порогов срабатывания, отличных от стандартных
+
+
+### Проверяем, что наш сервис com.macbat загружен
+```
+launchctl print gui/$UID | grep com.macbat
+```
+
+### Проверяем установки текущей работы программы
+```
+./macbat.run status
+```
+
+### Установка порогов срабатывания, отличных от стандартных
 ```
 ./macbat.run min 21
-./macbat.run max 79
+./macbat.run max 81
 ```
 
-> Пороги меняются прямо в тексте скрипта `./macbat.run` и считываются через `macbat.scpt`.
+> Пороги меняются прямо в тексте скрипта `./macbat.run`.
 
 ## Справка по командам:
 ```
 Скрипт запускает сервис отслеживания состояния зарядки ноутбука.
 
-Использование: ./macbat.run {load|start|unload|stop|restart|status}
-Использование: ./macbat.run {update|update '30'}
+Использование: ./macbat.run {load|start|unload|stop|restart|status|update}
 
 Описание ключей:
 
+check           - ручной запуск проверки заряда батареи
 load|start|on   - загружаем сервис в автозагрузку
 unload|stop|off - выгружавем сервис из автозагрузки
 restart         - перезапускаем сервис
 status|log      - отображаем статус сервиса
 update          - отображаем период опроса состояния батареи
-update 30       - устанавливаем период опроса батереи в сек.
 min         	- отображаем минимальный порог сигнала, в %
 min 20      	- устанавливаем минимальный порог сигнала, в процентах
 max         	- отображаем максимальный порог сигнала, в процентах

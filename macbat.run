@@ -18,37 +18,36 @@ MAX_CURRENT_LEVEL=0
 BATTERY_CHECK_LEVEL=3       
 
 # делитель периода проверки статуса батареи 
-# оставщееся время зарядки делим на этот делитель и получаем интервал проверки статуса батареи
+# оставшееся время зарядки делим на этот делитель и получаем интервал проверки статуса батареи
 BATTERY_CHECK_UPTIME=6      
 
 red="\`\`\` "
 
-minBatteryLevel=50
+minBatteryLevel=21
 maxBatteryLevel=81
 
 # Переменная для хранения статуса демона
 DAEMON_STATUS=""
 
+# Функция для экранирования всех недопустимых символов в тексте
+escape_special_chars() {
+  # shellcheck disable=SC2016
+  echo "$1" | sed 's/\\/\\\\/g; s/~/\\~/g; s/`/\\`/g; s/>/\\>/g; s/#/\\#/g; s/+/\\+/g; s/-/\\-/g; s/=/\\=/g; s/|/\\|/g; s/{/\\{/g; s/}/\\}/g; s/\./\\./g; s/!/\\!/g'
+}
+
+
 # Функция для отправки сообщения в Телеграм и в терминал
 telegram_message_send() {
-# set -x
-    # message="${1//./\.}"
-    message="${1//./\.}"
-    tel_message=$(echo "${message}" | sed 's/-//g; s/(/\\(/g; s/)/\\)/g; s/,/\,/g;')
-    # echo $message
-    # Кодирование текста URL-кодированием
-    # encode_message=$(echo "${message}" | jq -sRr @uri)
-    # encode_message="$( echo "${encode_message}" | sed 's/\./\\./g; s/(/\\\(/g; s/)/\\\)/g; s/\=/\\\=/g;')"
-    # echo "${tel_message}"
-    curl -s -X POST "https://api.telegram.org/bot${telegramToken}/sendMessage" \
-        -d "chat_id=${telegramChatId}" \
-        -d "parse_mode=MarkdownV2" \
-        -d "text=${tel_message}" &> /dev/null
-    
-    echo "${message}" | sed 's/*//g; s/_//g; s/\\//g; s/`//g;' 
 
-# set +x
-  
+    message="${1//\\n/$'\n'}"
+    # Экранирование всех недопустимых символов в тексте
+    escaped_message=$(escape_special_chars "$message")
+    # shellcheck disable=SC2154
+    api_url="https://api.telegram.org/bot${telegramToken}/sendMessage"
+    # shellcheck disable=SC2154
+    curl -s -X POST "${api_url}" --data "chat_id=${telegramChatId}" --data-urlencode "text=${escaped_message}" --data "parse_mode=MarkDownV2" &> /dev/null
+    # дублируем сообщение в консоль
+    echo "${message}" | sed 's/*//g; s/_//g; s/\\//g; s/`//g;'
 }
 
 # Функция для отправки системного сообщения в macOS
@@ -104,7 +103,7 @@ message_when_get_min(){
     battery_level=${1}
     battery_time=${2}
 
-	message="Уровень заряда снизился до ${battery_level}%\n"
+	  message="Уровень заряда снизился до ${battery_level}%\n"
     message="${message}Заряда осталось на ${battery_time}\n\n"
     message="${message}Подключите зарядку."
 	
@@ -113,24 +112,24 @@ message_when_get_min(){
 
 
 # Устанавливаем период запуска в фоне в секундах (БЕЗ СООБЩЕНИЙ)
-sudo_set_period(){
+reload_period(){
     period=${1}
 #    sudo_on
     sed -i "" "/StartInterval/,/dict/ s/<integer>.*<\/integer>/<integer>${period}<\/integer>/g" ${PLIST} && \
     launchctl unload ${PLIST} &>/dev/null && \
-    launchctl load ${PLIST} &>/dev/null && \
+    launchctl load ${PLIST} &>/dev/null
     # sudo launchctl disable ${SERVICE} &>/dev/null && \
-    launchctl enable ${SERVICE} &>/dev/null
+#    launchctl enable ${SERVICE} &>/dev/null
     
 }
 # Устанавливаем период запуска в фоне в секундах
 set_period() {
     period=${1}
     if [ -n "${period}" ]; then 
-    	sudo_set_period "${period}" && telegram_message_send "Период успешно установлен на *${period} сек.*" || \
-		telegram_message_send "${red}При установке периода возникла ошибка!${red}"
+    	  reload_period "${period}" && telegram_message_send "Период успешно установлен на *${period} сек.*" || \
+		        telegram_message_send "${red}При установке периода возникла ошибка!${red}"
     else 
-	   telegram_message_send "Период проверки статуса батареи установлен на *$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек.*"
+	      telegram_message_send "Период проверки статуса батареи установлен на *$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек.*"
     fi
 }
 
@@ -142,16 +141,15 @@ is_service_run() {
 
 # Загрузка демона в память
 daemon_load(){
-# set -x
-    #sudo_on
-    # unload_daemon &>/dev/null
+
+    unload_daemon &>/dev/null
     cp "${APP_PATH}/${PLIST_NAME}.plist" "${PLIST}"
     chmod 644 ${PLIST} && chown ${UID}:${GUI} "${PLIST}"
 
     launchctl unload ${PLIST} &>/dev/null
     launchctl load ${PLIST}  &>/dev/null
     if launchctl enable ${SERVICE}  ; then
-        [ -z "${1}" ] && telegram_message_send "${SERVICE_NAME} *успешно загружен.*"
+        [ -z "${?}" ] && telegram_message_send "${SERVICE_NAME} *успешно загружен.*"
             return 0
     else
         telegram_message_send "${SERVICE_NAME}:${red}при загрузке произошла ошибка.${red}"
@@ -183,7 +181,7 @@ unload_daemon() {
     # Проверяем, не запущен ли демон уже
     if is_service_run ; then
 	    launchctl disable ${SERVICE} &>/dev/null && launchctl unload ${PLIST} &>/dev/null && rm -f ${PLIST} && {
-            [ -z "${1}" ] && telegram_message_send "${SERVICE_NAME} *успешно выгружен.*"
+            [ -z "${?}" ] && telegram_message_send "${SERVICE_NAME} *успешно выгружен.*"
         }
         return 0
     else
@@ -199,25 +197,27 @@ get_poll_period(){
     period=0
     batt_stat=$(pmset -g batt)
     cur_batt_level=$(get_battery_level "${batt_stat}" | sed 's/%//g')
-# set -x
-    # Это число?
-    if [ -n "$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | grep -o '[0-9]*')" ]; then
-        hh=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
-        mm=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f2)
-        period=$((hh * 3600 + mm * 60))
 
-        if is_charging_on "${batt_stat}" ; then
-            diff=$((100 - cur_batt_level))
-            one_per=$((period / diff))
-            diff=$((maxBatteryLevel - cur_batt_level))
-        else
-            one_per=$((period / cur_batt_level))
-            diff=$((cur_batt_level - minBatteryLevel)) 
-        fi
-        diff=${diff#-} # модуль числа
-        period=$((diff * one_per / BATTERY_CHECK_UPTIME))
-        [ "${period}" -lt 10 ] && period=10 # устанавливаем минимальный интервал опроса статуса батареи
+    hh=$(echo "${batt_stat}" | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
+    mm=$(echo "${batt_stat}" | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f2)
+
+    if [ -n "$(echo "${mm}" | sed 's/[\(\)]//g; s/[^0-9]//g')" ]; then
+      period=$((hh * 3600 + mm * 60))
+    else
+      period=''
     fi
+
+    if is_charging_on "${batt_stat}" ; then
+        diff=$((100 - cur_batt_level))
+        [ -z "${period}" ] && one_per=150  || one_per=$((period / diff))
+        diff=$((maxBatteryLevel - cur_batt_level))
+    else
+        [ -z "${period}" ] && one_per=380  ||one_per=$((period / cur_batt_level))
+        diff=$((cur_batt_level - minBatteryLevel))
+    fi
+    diff=${diff#-} # модуль числа
+    period=$((diff * one_per / BATTERY_CHECK_UPTIME))
+    [ "${period}" -lt 10 ] && period=10 # устанавливаем минимальный интервал опроса статуса батареи
     echo ${period}
 # set +x
 }
@@ -276,17 +276,17 @@ stop_daemon() {
 }
 
 # Отключаем sudo
-#sudo_off(){
-#    [ -f "${SUDO_FILE}" ] && sudo rm -f "${SUDO_FILE}"
-#}
+sudo_off(){
+    [ -f "${SUDO_FILE}" ] && sudo rm -f "${SUDO_FILE}"
+}
 
 # Включаем sudo
-#sudo_on(){
-#    [ -f "${SUDO_FILE}" ] || {
-#        sudo touch "${SUDO_FILE}"
-#        sudo echo "$(whoami)            ALL = (ALL) NOPASSWD: ALL" > "${SUDO_FILE}"
-#    }
-#}
+sudo_on(){
+    [ -f "${SUDO_FILE}" ] || {
+        sudo touch "${SUDO_FILE}"
+        sudo echo "$(whoami)            ALL = (ALL) NOPASSWD: ALL" > "${SUDO_FILE}"
+    }
+}
 
 
 # Подключена ли зарядка?
@@ -435,14 +435,17 @@ when_checked(){
     level=${2}
     time_remain=${3}
 
+#   отправляем не каждый раз, а раз в BATTERY_CHECK_LEVEL
     let "mod = ${current_level} % ${BATTERY_CHECK_LEVEL}"
-    if [ "${mod}" = 0 ]; then 
+    mod=0
+    if [ "${mod}" = 0 ]; then
         # Отправляем системное сообщение и в телеграмм
         if [ "${level}" = max ] ; then 
             message="$(message_when_get_max "${current_level}" "${time_remain}" )"
         else 
             message="$(message_when_get_min "${current_level}" "${time_remain}")"
         fi
+#        mac_os_message_send "Ntsn"
         mac_os_message_send "${message}"
         telegram_message_send "${message}"
     fi
@@ -450,43 +453,44 @@ when_checked(){
 
 # Основная функция проверки заряда батареи
 battery_check(){
-# set -x
+
     batt_stat=$(pmset -g batt)
     current_battery_level=$(get_battery_level "${batt_stat}" | sed 's/%//')
     current_battery_time=$(get_battery_time_remain "${batt_stat}")
 
-    mac_os_message_send "Проверка после загрузки"
+#    mac_os_message_send "Проверка ${current_battery_level}:${current_battery_time}"
 
     #  Генерируем сообщение при условиях достижения лимитов 
-    if [ ${current_battery_level} -le ${minBatteryLevel} ]; then
+    if [ "${current_battery_level}" -le ${minBatteryLevel} ]; then
         # когда достигли минимального порога
         if is_charging_on "${batt_stat}"; then 
             # если зарядка уже подключена
             MIN_CURRENT_LEVEL=0
+
         else
             # если зарядка все еще не подключена
             when_checked "${current_battery_level}" min "${current_battery_time}"
             MIN_CURRENT_LEVEL=${BATTERY_CHECK_LEVEL}
+
         fi
 
     else 
-        if [ ${current_battery_level} -ge ${maxBatteryLevel} ]; then
+        if [ "${current_battery_level}" -ge ${maxBatteryLevel} ]; then
             # когда достигли максимального порога
             if is_charging_on "${batt_stat}" ; then 
                 # если зарядка все еще подключена
                 when_checked "${current_battery_level}" max  "${current_battery_time}"
                 MAX_CURRENT_LEVEL=${BATTERY_CHECK_LEVEL}
-                
             else
                 # если зарядку отключили
                 MAX_CURRENT_LEVEL=0
+
             fi
         fi
     fi
-    
     # Корректируем в случае необходимости интервал проверки уровня заряда батареи
     set_poll_interval
-    
+
 }
 
 
@@ -552,8 +556,9 @@ case "$1" in
 	print_line
     echo "Описание ключей:"
 	print_line
+	  echo "check           - ручной запуск проверки заряда батареи"
     echo "load|start|on   - загружаем сервис в автозагрузку"
-	echo "unload|stop|off - выгружавем сервис из автозагрузки"
+	  echo "unload|stop|off - выгружавем сервис из автозагрузки"
     echo "restart         - перезапускаем сервис"
     echo "status|log      - отображаем статус сервиса"
     echo "update          - отображаем период опроса состояния батареи"
