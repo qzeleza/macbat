@@ -437,7 +437,7 @@ when_checked(){
 
 #   отправляем не каждый раз, а раз в BATTERY_CHECK_LEVEL
     let "mod = ${current_level} % ${BATTERY_CHECK_LEVEL}"
-    mod=0
+#    mod=0
     if [ "${mod}" = 0 ]; then
         # Отправляем системное сообщение и в телеграмм
         if [ "${level}" = max ] ; then 
@@ -489,7 +489,7 @@ battery_check(){
         fi
     fi
     # Корректируем в случае необходимости интервал проверки уровня заряда батареи
-    set_poll_interval
+#    set_poll_interval
 
 }
 
