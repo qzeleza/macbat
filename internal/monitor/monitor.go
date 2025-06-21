@@ -142,6 +142,8 @@ func NewMonitor(config Config, logger *logger.Logger) *Monitor {
 func (m *Monitor) Start() {
 	var provider batteryInfoProvider
 
+	m.notifier.Info("Запуск монитора батареи...")
+
 	if m.config.UseSimulator {
 		m.notifier.Test("Режим работы: СИМУЛЯТОР.")
 		simulator := simulator.NewBatterySimulator(
@@ -150,24 +152,26 @@ func (m *Monitor) Start() {
 			m.config.MaxThreshold,
 			m.config.MaxNotifications,
 		)
-		// Создаем провайдера, который оборачивает вызов симулятора.
 		provider = func() (*battery.BatteryInfo, error) {
-			// Передаем симулятору обратную связь
 			return simulator.GetNextState(m.notificationsShown)
 		}
 	} else {
 		m.notifier.Info("Режим работы: РЕАЛЬНЫЕ ДАННЫЕ.")
-		// Назначаем провайдером функцию чтения реальных данных.
 		provider = battery.GetBatteryInfo
 	}
 
-	m.notifier.Info("Мониторинг запущен. Нажмите Ctrl+C для выхода.")
+	m.notifier.Info(fmt.Sprintf(
+		"Мониторинг запущен. Интервалы: зарядка - %v, разрядка - %v.",
+		m.config.CheckIntervalWhenCharging,
+		m.config.CheckIntervalWhenDischarging,
+	))
+
 	for {
 		currentInfo, err := provider()
 		if err != nil {
 			m.notifier.Error(fmt.Sprintf("Ошибка получения данных о батарее: %v. Следующая попытка через 30 секунд.", err))
 			time.Sleep(30 * time.Second)
-			continue // Пропускаем итерацию
+			continue
 		}
 
 		m.Check(time.Now(), *currentInfo)
@@ -178,7 +182,7 @@ func (m *Monitor) Start() {
 		} else {
 			sleepDuration = m.config.CheckIntervalWhenDischarging
 		}
-		m.notifier.Debug(fmt.Sprintf("...Следующая проверка через %v.\n", sleepDuration))
+		m.notifier.Debug(fmt.Sprintf("Следующая проверка через %v.", sleepDuration))
 		time.Sleep(sleepDuration)
 	}
 }
@@ -195,7 +199,7 @@ func (m *Monitor) Start() {
 func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 	// Оптимизация: если уровень заряда не изменился, дальнейшая проверка не нужна.
 	if m.isInitialized && info.CurrentCapacity == m.lastLevel {
-		m.notifier.Check("Уровень заряда не изменился. Проверка пропущена.")
+		m.notifier.Debug("Уровень заряда не изменился. Проверка пропущена.")
 		return
 	}
 	// Обновляем последнее известное значение уровня.

@@ -101,6 +101,14 @@
       "showLog": false
     },
     {
+      "name": "Отладка run",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/core",
+      "showLog": false
+    },
+    {
       "name": "C/C++ Runner: Debug Session",
       "type": "lldb",
       "request": "launch",

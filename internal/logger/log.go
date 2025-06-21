@@ -79,6 +79,13 @@ func (l *Logger) Info(message string) {
 	}
 }
 
+// Info записывает информационное сообщение в лог.
+func (l *Logger) Fatal(message string) {
+	if l.isLogEnabled {
+		log.Fatal(message)
+	}
+}
+
 // Check записывает специальное сообщение о проверке состояния.
 func (l *Logger) Check(message string) {
 	if l.isLogEnabled {
