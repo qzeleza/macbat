@@ -1,0 +1,112 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Отладка install",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "install"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "Отладка uninstall",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "uninstall"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "Отладка load",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "load"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "Отладка unload",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "unload"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "Отладка status",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "status"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "Отладка set",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "set min 90"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "Отладка check",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "check"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "Отладка set check up",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "set check up 10"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "Отладка config",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/macbat",
+      "args": [
+        "config"
+      ],
+      "showLog": false
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/samovar/develop/macbat/grok/macbat/internal/battery",
+      "program": "/Users/samovar/develop/macbat/grok/macbat/internal/battery/build/Debug/outDebug"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+./internal/battery/test_config_helper.go|./internal/battery/config_helper_test.go
+./internal/battery/test_battery.go|./internal/battery/battery_test.go
+./internal/battery/test_fixes.go|./internal/battery/fixes_test.go
+./internal/battery/test_integration.go|./internal/battery/integration_test.go
