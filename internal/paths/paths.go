@@ -48,7 +48,7 @@ func LogPath() string {
 // PlistPath возвращает путь к файлу plist для launchd.
 // @return string - путь к com.macbat.plist
 func PlistPath() string {
-	return filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com."+AppName+".agent.plist")
+	return filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", AgentIdentifier()+".plist")
 }
 
 // ErrorLogPath возвращает путь к файлу ошибок.

@@ -1,18 +1,17 @@
-package service
+package main
 
 import (
 	"fmt"
+	"macbat/internal/logger"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"macbat/internal/log"
 )
 
 // addToPath добавляет директорию в переменную PATH в файле конфигурации оболочки
 // и обновляет текущую сессию
-func addToPath(path string) error {
+func addToPath(path string, log *logger.Logger) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("не удалось определить домашнюю директорию: %v", err)
@@ -99,7 +98,7 @@ func addToPath(path string) error {
 }
 
 // removeFromPath удаляет директорию из переменной PATH в файле конфигурации оболочки
-func removeFromPath(path string) error {
+func removeFromPath(path string, log *logger.Logger) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("не удалось определить домашнюю директорию: %v", err)
@@ -141,7 +140,7 @@ func removeFromPath(path string) error {
 }
 
 // updateShell обновляет текущую сессию оболочки
-func updateShell() error {
+func updateShell(log *logger.Logger) error {
 	// Получаем путь к текущей оболочке
 	shell := os.Getenv("SHELL")
 	if shell == "" {

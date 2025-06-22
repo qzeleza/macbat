@@ -64,6 +64,7 @@ package monitor
 import (
 	"fmt"
 	"macbat/internal/battery"
+	"macbat/internal/config"
 	"macbat/internal/logger"
 	"macbat/internal/simulator"
 	"time"
@@ -74,32 +75,11 @@ import (
 //================================================================================
 
 /**
- * @struct Config
- * @brief Содержит все настраиваемые параметры для монитора батареи.
- *
- * Использование структуры конфигурации позволяет избежать жестко заданных
- * констант и делает модуль более гибким.
- */
-type Config struct {
-	MinThreshold                 int           // Минимальный порог заряда для уведомления при разрядке.
-	MaxThreshold                 int           // Максимальный порог заряда для уведомления при зарядке.
-	NotificationInterval         time.Duration // Минимальный интервал между последовательными уведомлениями.
-	MaxNotifications             int           // Максимальное число уведомлений за один цикл (заряд/разряд).
-	CheckIntervalWhenCharging    time.Duration // Интервал опроса, когда устройство заряжается.
-	CheckIntervalWhenDischarging time.Duration // Интервал опроса, когда устройство разряжается.
-	LogFilePath                  string        // ИЗМЕНЕНИЕ: Путь к логу теперь часть конфига.
-	LogRotationLines             int           // ИЗМЕНЕНИЕ: Макс. строк в логе до ротации.
-	UseSimulator                 bool          // ИЗМЕНЕНИЕ: Флаг для включения/отключения симулятора.
-	LogEnabled                   bool          // ИЗМЕНЕНИЕ: Флаг для включения/отключения логирования.
-	DebugEnabled                 bool          // ИЗМЕНЕНИЕ: Флаг для включения/отключения DEBUG логирования.
-}
-
-/**
  * @struct Monitor
  * @brief Основной объект, который управляет состоянием и логикой мониторинга.
  */
 type Monitor struct {
-	config               Config         // Конфигурация монитора.
+	config               config.Config  // Конфигурация монитора.
 	notifier             *logger.Logger // Объект для отправки уведомлений.
 	lastNotificationTime time.Time      // Временная метка последнего уведомления.
 	notificationsShown   int            // Счетчик показанных уведомлений в текущем цикле.
@@ -121,9 +101,9 @@ type batteryInfoProvider func() (*battery.BatteryInfo, error)
  * @param logger Реализация интерфейса Logger для отправки уведомлений.
  * @return Указатель на полностью готовый к работе экземпляр Monitor.
  */
-func NewMonitor(config Config, logger *logger.Logger) *Monitor {
+func NewMonitor(config *config.Config, logger *logger.Logger) *Monitor {
 	return &Monitor{
-		config:   config,
+		config:   *config,
 		notifier: logger,
 		// Инициализируем lastLevel значением, которое точно не совпадет
 		// с реальным уровнем заряда при первой проверке.

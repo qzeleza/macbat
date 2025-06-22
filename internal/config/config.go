@@ -1,473 +1,247 @@
+// Package config управляет конфигурацией приложения.
+// Он предоставляет структуру Config и Manager для загрузки, сохранения
+// и управления настройками из файла JSON. Модуль является самодостаточным
+// и не зависит от глобального состояния.
 package config
 
 import (
 	"encoding/json"
 	"fmt"
-	"macbat/internal/log"
+	"macbat/internal/logger" // Предполагается, что у вас есть такой логгер
+	"macbat/internal/paths"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
-	"sync"
 	"time"
-
-	"github.com/urfave/cli/v2"
 )
 
-var (
-	// configInstance хранит закешированный экземпляр конфигурации
-	configInstance *Config
-	configOnce     sync.Once
-	configErr      error
-)
-
-// NotificationState содержит состояние уведомлений
-// @note Используется для сохранения состояния между перезапусками приложения
+// NotificationState содержит состояние уведомлений.
+// @note Используется для сохранения состояния между перезапусками приложения.
+// @remark Эту структуру логичнее было бы перенести в пакет, управляющий состоянием (state),
+// но пока оставляем здесь для совместимости.
 type NotificationState struct {
-	LastTime     time.Time `json:"last_time"`     // Время последнего уведомления
-	Count        int       `json:"count"`         // Количество отправленных уведомлений
-	LastLevel    int       `json:"last_level"`    // Последний уровень заряда, при котором было отправлено уведомление
-	LastCharging bool      `json:"last_charging"` // Последнее состояние зарядки
+	LastTime     time.Time `json:"last_time"`
+	Count        int       `json:"count"`
+	LastLevel    int       `json:"last_level"`
+	LastCharging bool      `json:"last_charging"`
 }
 
-// Config содержит настройки приложения.
+// Config содержит все настраиваемые параметры приложения.
 type Config struct {
-	MinThreshold                 int                `json:"min_threshold"`                // Минимальный порог заряда (%)
-	MaxThreshold                 int                `json:"max_threshold"`                // Максимальный порог заряда (%)
-	CheckIntervalWhenCharging    int                `json:"check_interval_charging"`      // Интервал проверки при зарядке (секунды)
-	CheckIntervalWhenDischarging int                `json:"check_interval_discharging"`   // Интервал проверки без зарядки (секунды)
-	NotificationInterval         int                `json:"notification_interval"`        // Интервал уведомлений (минуты)
-	MaxNotifications             int                `json:"max_notifications"`            // Максимум уведомлений подряд
-	Debug                        bool               `json:"debug"`                        // Отображать DEBUG логи
-	NotificationState            *NotificationState `json:"notification_state,omitempty"` // Состояние уведомлений
+	MinThreshold                 int           `json:"min_threshold"`
+	MaxThreshold                 int           `json:"max_threshold"`
+	CheckIntervalWhenCharging    time.Duration `json:"check_interval_charging"`
+	CheckIntervalWhenDischarging time.Duration `json:"check_interval_discharging"`
+	NotificationInterval         time.Duration `json:"notification_interval"`
+	MaxNotifications             int           `json:"max_notifications"`
+	DebugEnabled                 bool          `json:"debug_enabled"`
+	LogFilePath                  string        `json:"log_file_path"`
+	LogRotationLines             int           `json:"log_rotation_lines"`
+	UseSimulator                 bool          `json:"use_simulator"`
+	LogEnabled                   bool          `json:"log_enabled"`
 }
 
-// DefaultConfig возвращает конфигурацию по умолчанию.
-// @return Config - конфигурация по умолчанию
-func DefaultConfig() Config {
-	return Config{
+// Manager инкапсулирует всю логику управления конфигурацией.
+// Это основная структура модуля, заменяющая глобальные переменные и синглтоны.
+type Manager struct {
+	configPath string
+	log        *logger.Logger
+}
+
+// New создает новый экземпляр менеджера конфигурации.
+// @param log *logger.Logger - экземпляр логгера.
+// @param customPath ...string - необязательный пользовательский путь к файлу конфигурации.
+// Если путь не указан, будет использован путь по умолчанию (~/.config/macbat/config.json).
+// @return *Manager - указатель на новый экземпляр менеджера.
+// @return error - ошибка, если не удалось определить путь или создать директорию.
+func New(log *logger.Logger, customPath ...string) (*Manager, error) {
+	var configPath string
+
+	if len(customPath) > 0 && customPath[0] != "" {
+		configPath = customPath[0]
+	} else {
+		configPath = paths.ConfigPath()
+	}
+
+	configDir := filepath.Dir(configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return nil, fmt.Errorf("не удалось создать директорию для конфигурации %s: %w", configDir, err)
+	}
+
+	return &Manager{
+		configPath: configPath,
+		log:        log,
+	}, nil
+}
+
+// Default возвращает указатель на структуру Config с настройками по умолчанию.
+func Default() *Config {
+	return &Config{
 		MinThreshold:                 21,
 		MaxThreshold:                 81,
-		CheckIntervalWhenCharging:    60,   // 1 минута при зарядке
-		CheckIntervalWhenDischarging: 2280, // 38 минут при работе от батареи
-		NotificationInterval:         5,
+		NotificationInterval:         30 * time.Minute,
 		MaxNotifications:             3,
-		Debug:                        false,
-		NotificationState: &NotificationState{
-			LastTime:     time.Time{},
-			Count:        0,
-			LastLevel:    0,
-			LastCharging: false,
-		},
+		LogFilePath:                  paths.LogPath(),
+		LogRotationLines:             1000,
+		CheckIntervalWhenCharging:    30 * time.Second,
+		CheckIntervalWhenDischarging: 30 * time.Minute,
+		UseSimulator:                 false,
+		LogEnabled:                   true,
+		DebugEnabled:                 false,
 	}
 }
 
-// mergeWithDefaults объединяет загруженную конфигурацию с настройками по умолчанию.
-// @param loaded *Config - загруженная конфигурация
-// @return *Config - конфигурация с замененными нулевыми значениями
-func mergeWithDefaults(loaded *Config) *Config {
-	defaultCfg := DefaultConfig()
-
-	if loaded.MinThreshold == 0 {
-		log.Info(fmt.Sprintf("Установлен минимальный порог по умолчанию: %d%%", defaultCfg.MinThreshold))
-		loaded.MinThreshold = defaultCfg.MinThreshold
-	}
-	if loaded.MaxThreshold == 0 {
-		log.Info(fmt.Sprintf("Установлен максимальный порог по умолчанию: %d%%", defaultCfg.MaxThreshold))
-		loaded.MaxThreshold = defaultCfg.MaxThreshold
-	}
-	if loaded.CheckIntervalWhenCharging == 0 {
-		log.Info(fmt.Sprintf("Установлен интервал проверки при зарядке по умолчанию: %d сек", defaultCfg.CheckIntervalWhenCharging))
-		loaded.CheckIntervalWhenCharging = defaultCfg.CheckIntervalWhenCharging
-	}
-	if loaded.CheckIntervalWhenDischarging == 0 {
-		log.Info(fmt.Sprintf("Установлен интервал проверки при отключении зарядки по умолчанию: %d сек", defaultCfg.CheckIntervalWhenDischarging))
-		loaded.CheckIntervalWhenDischarging = defaultCfg.CheckIntervalWhenDischarging
-	}
-	if loaded.NotificationInterval == 0 {
-		log.Info(fmt.Sprintf("Установлен интервал уведомлений по умолчанию: %d мин", defaultCfg.NotificationInterval))
-		loaded.NotificationInterval = defaultCfg.NotificationInterval
-	}
-	if loaded.MaxNotifications == 0 {
-		log.Info(fmt.Sprintf("Установлено максимальное количество уведомлений по умолчанию: %d", defaultCfg.MaxNotifications))
-		loaded.MaxNotifications = defaultCfg.MaxNotifications
-	}
-	if !loaded.Debug {
-		log.Info(fmt.Sprintf("Установлено отображение DEBUG логов по умолчанию: %t", defaultCfg.Debug))
-		loaded.Debug = defaultCfg.Debug
-	}
-
-	log.Debug("Конфигурация успешно обновлена.")
-	return loaded
+// ConfigPath возвращает путь к файлу конфигурации, которым управляет менеджер.
+func (m *Manager) ConfigPath() string {
+	return m.configPath
 }
 
-// InitConfig инициализирует конфигурацию при запуске приложения
-// @return error - ошибка, если не удалось инициализировать конфигурацию
-func InitConfig() error {
-	_, err := LoadConfig()
-	return err
-}
-
-// LoadConfig загружает конфигурацию из файла или создает новую, если файл не существует.
-// Конфигурация загружается только один раз и кешируется.
-// @return *Config - указатель на конфигурацию
-// @return error - ошибка, если не удалось загрузить/создать конфигурацию
-func LoadConfig() (*Config, error) {
-	// Используем sync.Once для потокобезопасной инициализации
-	configOnce.Do(func() {
-		configInstance, configErr = loadConfigFromFile()
-		if configErr != nil {
-			configErr = fmt.Errorf("не удалось загрузить конфигурацию: %w", configErr)
-		}
-	})
-
-	return configInstance, configErr
-}
-
-// loadConfigFromFile загружает конфигурацию из файла или создает новую
-// @return *Config - указатель на конфигурацию
-// @return error - ошибка, если не удалось загрузить/создать конфигурацию
-func loadConfigFromFile() (*Config, error) {
-	configPath, err := getConfigPath()
-	if err != nil {
-		return nil, fmt.Errorf("не удалось определить путь к конфигурации: %w", err)
-	}
-
-	// Если файл конфигурации не существует, создаем новый с настройками по умолчанию
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		config := DefaultConfig()
-		if err := saveConfigToFile(configPath, &config); err != nil {
+// Load загружает конфигурацию из файла.
+// Если файл не существует, он будет создан с настройками по умолчанию.
+// Если в файле отсутствуют какие-либо поля (равны "нулевому" значению),
+// они будут заполнены значениями по умолчанию.
+// @return *Config - указатель на загруженную и проверенную конфигурацию.
+// @return error - ошибка, если не удалось прочитать или разобрать файл.
+func (m *Manager) Load() (*Config, error) {
+	if _, err := os.Stat(m.configPath); os.IsNotExist(err) {
+		m.log.Info("Файл конфигурации не найден. Создание нового с настройками по умолчанию.")
+		defaultCfg := Default()
+		if err := m.Save(defaultCfg); err != nil {
 			return nil, fmt.Errorf("не удалось сохранить конфигурацию по умолчанию: %w", err)
 		}
-		return &config, nil
+		return defaultCfg, nil
 	}
 
-	// Читаем существующий файл конфигурации
-	file, err := os.Open(configPath)
+	// ИЗМЕНЕНИЕ: Читаем файл один раз в память для последующего двойного разбора.
+	data, err := os.ReadFile(m.configPath)
 	if err != nil {
-		return nil, fmt.Errorf("не удалось открыть файл конфигурации: %w", err)
-	}
-	defer file.Close()
-
-	var config Config
-	if err := json.NewDecoder(file).Decode(&config); err != nil {
-		return nil, fmt.Errorf("ошибка при разборе файла конфигурации: %w", err)
+		return nil, fmt.Errorf("не удалось прочитать файл конфигурации: %w", err)
 	}
 
-	// Убедимся, что состояние уведомлений инициализировано
-	if config.NotificationState == nil {
-		config.NotificationState = &NotificationState{}
+	// Шаг 1: Разбираем JSON в общую карту, чтобы определить присутствующие ключи.
+	presenceMap := make(map[string]interface{})
+	if err := json.Unmarshal(data, &presenceMap); err != nil {
+		return nil, fmt.Errorf("ошибка при первичном разборе файла конфигурации (в карту): %w", err)
 	}
 
-	// Объединяем с настройками по умолчанию
-	mergedConfig := mergeWithDefaults(&config)
-
-	// Сохраняем обновленную конфигурацию, если были применены значения по умолчанию
-	updatedData, err := json.MarshalIndent(mergedConfig, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("ошибка сериализации обновленной конфигурации: %w", err)
+	// Шаг 2: Разбираем тот же JSON в строго типизированную структуру.
+	var loadedCfg Config
+	if err := json.Unmarshal(data, &loadedCfg); err != nil {
+		return nil, fmt.Errorf("ошибка при вторичном разборе файла конфигурации (в структуру): %w", err)
 	}
 
-	// Читаем текущее содержимое файла для сравнения
-	currentData, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("ошибка чтения текущей конфигурации: %w", err)
-	}
-
-	// Сохраняем, если конфигурация изменилась
-	if string(updatedData) != string(currentData) {
-		log.Debug("Обнаружены изменения в конфигурации, сохраняем...")
-		if err := saveConfigToFile(configPath, mergedConfig); err != nil {
-			return nil, fmt.Errorf("не удалось сохранить обновленную конфигурацию: %w", err)
+	// Шаг 3: Объединяем конфигурацию, используя карту присутствия ключей.
+	finalCfg, wasModified := m.mergeWithDefaults(&loadedCfg, presenceMap)
+	if wasModified {
+		m.log.Info("Конфигурация была дополнена значениями по умолчанию. Сохраняем изменения...")
+		if err := m.Save(finalCfg); err != nil {
+			m.log.Debug(fmt.Sprintf("Не удалось автоматически сохранить дополненную конфигурацию: %v", err))
 		}
-		log.Debug("Конфигурация успешно обновлена")
 	}
 
-	return mergedConfig, nil
+	return finalCfg, nil
 }
 
-// getConfigPath возвращает путь к файлу конфигурации
-// @return string - путь к файлу конфигурации
-// @return error - ошибка, если не удалось определить путь
-func getConfigPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("не удалось определить домашнюю директорию: %w", err)
-	}
-
-	appConfigDir := filepath.Join(homeDir, ".config", "macbat")
-	if err := os.MkdirAll(appConfigDir, 0755); err != nil {
-		return "", fmt.Errorf("не удалось создать директорию конфигурации: %w", err)
-	}
-
-	return filepath.Join(appConfigDir, "config.json"), nil
-}
-
-// saveConfigToFile сохраняет конфигурацию в файл
-// @param configPath string - путь к файлу конфигурации
-// @param cfg *Config - указатель на конфигурацию
-// @return error - ошибка, если не удалось сохранить
-func saveConfigToFile(configPath string, cfg *Config) error {
-	tempFile := configPath + ".tmp"
+// Save атомарно сохраняет предоставленную конфигурацию в файл.
+// Использует временный файл и переименование для безопасности записи.
+// @param cfg *Config - указатель на конфигурацию для сохранения.
+// @return error - ошибка, если не удалось записать или переименовать файл.
+func (m *Manager) Save(cfg *Config) error {
+	tempFile := m.configPath + ".tmp"
 	file, err := os.Create(tempFile)
 	if err != nil {
 		return fmt.Errorf("не удалось создать временный файл конфигурации: %w", err)
 	}
-	defer file.Close()
+	// `defer os.Remove(tempFile)` удалит временный файл в любом случае:
+	// и при успешном переименовании, и при ошибке.
+	defer os.Remove(tempFile)
 
 	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
+	encoder.SetIndent("", "  ") // Для читаемого формата JSON
 
 	if err := encoder.Encode(cfg); err != nil {
-		os.Remove(tempFile) // Удаляем временный файл в случае ошибки
+		file.Close() // Закрываем перед удалением
 		return fmt.Errorf("ошибка при кодировании конфигурации: %w", err)
 	}
+	// Важно закрыть файл перед переименованием, особенно в Windows.
+	file.Close()
 
-	// Атомарная замена файла
-	if err := os.Rename(tempFile, configPath); err != nil {
-		os.Remove(tempFile) // Удаляем временный файл в случае ошибки
+	// Атомарная замена файла.
+	if err := os.Rename(tempFile, m.configPath); err != nil {
 		return fmt.Errorf("не удалось сохранить конфигурацию: %w", err)
 	}
 
+	m.log.Debug("Конфигурация успешно сохранена.")
 	return nil
 }
 
-// SaveConfig сохраняет текущую конфигурацию в файл
-// @param cfg *Config - указатель на конфигурацию для сохранения
-// @return error - ошибка, если не удалось сохранить
-func SaveConfig(cfg *Config) error {
-	configPath, err := getConfigPath()
-	if err != nil {
-		return fmt.Errorf("не удалось определить путь к конфигурации: %w", err)
-	}
-	return saveConfigToFile(configPath, cfg)
-}
+// mergeWithDefaults проверяет нулевые значения в загруженной конфигурации и заменяет их
+// значениями по умолчанию. Возвращает итоговую конфигурацию и флаг, были ли внесены изменения.
+func (m *Manager) mergeWithDefaults(loaded *Config, presenceMap map[string]interface{}) (finalCfg *Config, wasModified bool) {
+	defaultCfg := Default()
+	changesMade := false
 
-// UpdateConfig обновляет конфигурацию и сохраняет файл.
-// @param key string - имя параметра
-// @param value string - новое значение
-// @return error - ошибка, если не удалось обновить или сохранить конфигурацию
-func UpdateConfig(key string, value string, currentCapacity int, isCharging bool) error {
-	// Загружаем текущую конфигурацию
-	config, err := LoadConfig()
-	if err != nil {
-		return err
+	// Функция-помощник для проверки наличия ключа в JSON
+	keyExists := func(key string) bool {
+		_, ok := presenceMap[key]
+		return ok
 	}
 
-	// Обновляем значение в зависимости от ключа
-	switch key {
-	case "min":
-		min, err := strconv.Atoi(value)
-		if err != nil || min < 1 || min > 100 {
-			return fmt.Errorf("некорректное значение для минимального порога: %s. Укажите число от 1 до 100", value)
-		}
-		config.MinThreshold = min
-
-	case "max":
-		max, err := strconv.Atoi(value)
-		if err != nil || max < 1 || max > 100 {
-			return fmt.Errorf("некорректное значение для максимального порога: %s. Укажите число от 1 до 100", value)
-		}
-		config.MaxThreshold = max
-
-	case "check-interval-charging":
-		interval, err := strconv.Atoi(value)
-		if err != nil || interval < 1 {
-			return fmt.Errorf("некорректное значение для интервала проверки при зарядке: %s. Укажите положительное число", value)
-		}
-		config.CheckIntervalWhenCharging = interval
-
-	case "check-interval-discharging":
-		interval, err := strconv.Atoi(value)
-		if err != nil || interval < 1 {
-			return fmt.Errorf("некорректное значение для интервала проверки при разрядке: %s. Укажите положительное число", value)
-		}
-		config.CheckIntervalWhenDischarging = interval
-
-	case "interval":
-		interval, err := strconv.Atoi(value)
-		if err != nil || interval < 1 {
-			return fmt.Errorf("некорректное значение для интервала уведомлений: %s. Укажите положительное число", value)
-		}
-		config.NotificationInterval = interval
-
-	case "max-notifications":
-		max, err := strconv.Atoi(value)
-		if err != nil || max < 1 {
-			return fmt.Errorf("некорректное значение для максимального количества уведомлений: %s. Укажите положительное число", value)
-		}
-		config.MaxNotifications = max
-
-	default:
-		return fmt.Errorf("неизвестный параметр конфигурации: %s", key)
+	// Применяем значения по умолчанию, только если ключ ОТСУТСТВУЕТ в файле.
+	if !keyExists("min_threshold") {
+		m.log.Debug(fmt.Sprintf("Поле 'min_threshold' отсутствует. Установлено значение по умолчанию: %d", defaultCfg.MinThreshold))
+		loaded.MinThreshold = defaultCfg.MinThreshold
+		changesMade = true
+	}
+	if !keyExists("max_threshold") {
+		m.log.Debug(fmt.Sprintf("Поле 'max_threshold' отсутствует. Установлено значение по умолчанию: %d", defaultCfg.MaxThreshold))
+		loaded.MaxThreshold = defaultCfg.MaxThreshold
+		changesMade = true
+	}
+	if !keyExists("check_interval_charging") {
+		m.log.Debug(fmt.Sprintf("Поле 'check_interval_charging' отсутствует. Установлено значение по умолчанию: %v", defaultCfg.CheckIntervalWhenCharging))
+		loaded.CheckIntervalWhenCharging = defaultCfg.CheckIntervalWhenCharging
+		changesMade = true
+	}
+	if !keyExists("check_interval_discharging") {
+		m.log.Debug(fmt.Sprintf("Поле 'check_interval_discharging' отсутствует. Установлено значение по умолчанию: %v", defaultCfg.CheckIntervalWhenDischarging))
+		loaded.CheckIntervalWhenDischarging = defaultCfg.CheckIntervalWhenDischarging
+		changesMade = true
+	}
+	if !keyExists("notification_interval") {
+		m.log.Debug(fmt.Sprintf("Поле 'notification_interval' отсутствует. Установлено значение по умолчанию: %v", defaultCfg.NotificationInterval))
+		loaded.NotificationInterval = defaultCfg.NotificationInterval
+		changesMade = true
+	}
+	if !keyExists("max_notifications") {
+		m.log.Debug(fmt.Sprintf("Поле 'max_notifications' отсутствует. Установлено значение по умолчанию: %d", defaultCfg.MaxNotifications))
+		loaded.MaxNotifications = defaultCfg.MaxNotifications
+		changesMade = true
+	}
+	if !keyExists("debug_enabled") {
+		m.log.Debug(fmt.Sprintf("Поле 'debug_enabled' отсутствует. Установлено значение по умолчанию: %t", defaultCfg.DebugEnabled))
+		loaded.DebugEnabled = defaultCfg.DebugEnabled
+		changesMade = true
+	}
+	if !keyExists("log_file_path") {
+		m.log.Debug(fmt.Sprintf("Поле 'log_file_path' отсутствует. Установлено значение по умолчанию: %s", defaultCfg.LogFilePath))
+		loaded.LogFilePath = defaultCfg.LogFilePath
+		changesMade = true
+	}
+	if !keyExists("log_rotation_lines") {
+		m.log.Debug(fmt.Sprintf("Поле 'log_rotation_lines' отсутствует. Установлено значение по умолчанию: %d", defaultCfg.LogRotationLines))
+		loaded.LogRotationLines = defaultCfg.LogRotationLines
+		changesMade = true
+	}
+	if !keyExists("use_simulator") {
+		m.log.Debug(fmt.Sprintf("Поле 'use_simulator' отсутствует. Установлено значение по умолчанию: %t", defaultCfg.UseSimulator))
+		loaded.UseSimulator = defaultCfg.UseSimulator
+		changesMade = true
+	}
+	if !keyExists("log_enabled") {
+		m.log.Debug(fmt.Sprintf("Поле 'log_enabled' отсутствует. Установлено значение по умолчанию: %t", defaultCfg.LogEnabled))
+		loaded.LogEnabled = defaultCfg.LogEnabled
+		changesMade = true
 	}
 
-	// Сбрасываем счетчик уведомлений и обновляем состояние
-	config.NotificationState.Count = 0
-	config.NotificationState.LastTime = time.Time{}
-	config.NotificationState.LastLevel = currentCapacity
-	config.NotificationState.LastCharging = isCharging
-
-	// Сохраняем обновленную конфигурацию
-	if err := SaveConfig(config); err != nil {
-		return fmt.Errorf("не удалось сохранить конфигурацию: %w", err)
-	}
-
-	return nil
-}
-
-// UpdateConfigWithFunc обновляет конфигурацию с помощью функции-обновляльщика
-// @param updater func(*Config) - функция для обновления конфигурации
-// @return error - ошибка, если не удалось обновить или сохранить конфигурацию
-func UpdateConfigWithFunc(updater func(*Config)) error {
-	config, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("не удалось загрузить конфигурацию: %w", err)
-	}
-
-	// Вызываем функцию обновления
-	updater(config)
-
-	// Сохраняем обновленную конфигурацию
-	if err := SaveConfig(config); err != nil {
-		return fmt.Errorf("не удалось сохранить конфигурацию: %w", err)
-	}
-
-	return nil
-}
-
-// CheckWriteAccess проверяет права записи в директорию.
-// @param path string - путь к директории
-// @return error - ошибка, если нет прав записи
-func CheckWriteAccess(path string) error {
-	testFile := filepath.Join(path, ".test")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
-		return fmt.Errorf("нет прав на запись в директорию %s: %w", path, err)
-	}
-	// Удаляем тестовый файл
-	_ = os.Remove(testFile)
-	return nil
-}
-
-// UpdateFullConfig обновляет конфигурацию через CLI контекст
-// @param c *cli.Context - контекст CLI
-// @param key string - ключ параметра
-// @param value string - новое значение
-// @param setInterval string - интервал для настройки
-// @return error - ошибка, если не удалось обновить конфигурацию
-func UpdateFullConfig(c *cli.Context, key, value, setInterval string) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return err
-	}
-
-	switch key {
-	case "check":
-		// Извлекаем второй аргумент, следующий за 'check'
-		param := strings.ToLower(value)
-
-		// Извлекаем третий аргумент, следующий за 'up' или 'down'
-		interval, err := strconv.Atoi(setInterval)
-		if err != nil {
-			return fmt.Errorf("значение должно быть числом")
-		}
-		if interval <= 0 {
-			return fmt.Errorf("интервал проверки должен быть положительным числом")
-		}
-
-		if param == "up" {
-			cfg.CheckIntervalWhenCharging = interval
-		} else if param == "down" {
-			cfg.CheckIntervalWhenDischarging = interval
-		} else {
-			return fmt.Errorf("значение должно быть 'up' или 'down'")
-		}
-
-	case "min":
-		val, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("значение должно быть числом")
-		}
-		if val < 0 || val > 100 {
-			return fmt.Errorf("минимальный порог должен быть от 0 до 100")
-		}
-		if val >= cfg.MaxThreshold {
-			return fmt.Errorf("минимальный порог должен быть меньше максимального")
-		}
-		cfg.MinThreshold = val
-
-	case "max":
-		val, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("значение должно быть числом")
-		}
-		if val <= 0 || val > 100 {
-			return fmt.Errorf("максимальный порог должен быть от 1 до 100")
-		}
-		if val <= cfg.MinThreshold {
-			return fmt.Errorf("максимальный порог должен быть больше минимального")
-		}
-		cfg.MaxThreshold = val
-
-	case "notification-interval":
-		val, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("значение должно быть числом")
-		}
-		if val <= 0 {
-			return fmt.Errorf("интервал уведомлений должен быть положительным числом")
-		}
-		cfg.NotificationInterval = val
-
-	case "max-notifications":
-		val, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("значение должно быть числом")
-		}
-		if val <= 0 {
-			return fmt.Errorf("максимальное количество уведомлений должно быть положительным числом")
-		}
-		cfg.MaxNotifications = val
-
-	default:
-		return fmt.Errorf("неизвестный параметр конфигурации: %s", key)
-	}
-
-	// Сохраняем обновленную конфигурацию
-	if err := SaveConfig(cfg); err != nil {
-		return fmt.Errorf("не удалось сохранить конфигурацию: %w", err)
-	}
-
-	return nil
-}
-
-// reloadService перезагружает сервис
-// @return error - ошибка, если не удалось перезагрузить сервис
-// @return nil - если сервис успешно перезагружен
-func reloadService() error {
-	// Останавливаем сервис
-	cmd := exec.Command("launchctl", "unload", "/Library/LaunchDaemons/com.macbat.plist")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("не удалось остановить сервис: %w", err)
-	}
-
-	// Запускаем сервис
-	cmd = exec.Command("launchctl", "load", "/Library/LaunchDaemons/com.macbat.plist")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("не удалось запустить сервис: %w", err)
-	}
-
-	return nil
-}
-
-// updatePlistInterval обновляет значение StartInterval в plist файле
-// @param plistContent string - содержимое plist файла
-// @param interval int - новый интервал в секундах
-// @return string - обновленное содержимое plist файла
-func updatePlistInterval(plistContent string, interval int) string {
-	// Регулярное выражение для поиска и замены значения StartInterval
-	re := regexp.MustCompile(`<key>StartInterval</key>\s*<integer>\d+</integer>`)
-	return re.ReplaceAllString(plistContent, fmt.Sprintf("<key>StartInterval</key>\n        <integer>%d</integer>", interval))
+	return loaded, changesMade
 }
