@@ -27,17 +27,17 @@ type NotificationState struct {
 
 // Config содержит все настраиваемые параметры приложения.
 type Config struct {
-	MinThreshold                 int           `json:"min_threshold"`
-	MaxThreshold                 int           `json:"max_threshold"`
-	CheckIntervalWhenCharging    time.Duration `json:"check_interval_charging"`
-	CheckIntervalWhenDischarging time.Duration `json:"check_interval_discharging"`
-	NotificationInterval         time.Duration `json:"notification_interval"`
-	MaxNotifications             int           `json:"max_notifications"`
-	DebugEnabled                 bool          `json:"debug_enabled"`
-	LogFilePath                  string        `json:"log_file_path"`
-	LogRotationLines             int           `json:"log_rotation_lines"`
-	UseSimulator                 bool          `json:"use_simulator"`
-	LogEnabled                   bool          `json:"log_enabled"`
+	MinThreshold                 int    `json:"min_threshold"`
+	MaxThreshold                 int    `json:"max_threshold"`
+	CheckIntervalWhenCharging    int    `json:"check_interval_charging"`
+	CheckIntervalWhenDischarging int    `json:"check_interval_discharging"`
+	NotificationInterval         int    `json:"notification_interval"`
+	MaxNotifications             int    `json:"max_notifications"`
+	DebugEnabled                 bool   `json:"debug_enabled"`
+	LogFilePath                  string `json:"log_file_path"`
+	LogRotationLines             int    `json:"log_rotation_lines"`
+	UseSimulator                 bool   `json:"use_simulator"`
+	LogEnabled                   bool   `json:"log_enabled"`
 }
 
 // Manager инкапсулирует всю логику управления конфигурацией.
@@ -78,12 +78,12 @@ func Default() *Config {
 	return &Config{
 		MinThreshold:                 21,
 		MaxThreshold:                 81,
-		NotificationInterval:         30 * time.Minute,
+		NotificationInterval:         1800, // ИЗМЕНЕНИЕ: 30 минут = 1800 секунд
 		MaxNotifications:             3,
 		LogFilePath:                  paths.LogPath(),
 		LogRotationLines:             1000,
-		CheckIntervalWhenCharging:    30 * time.Second,
-		CheckIntervalWhenDischarging: 30 * time.Minute,
+		CheckIntervalWhenCharging:    30,   // ИЗМЕНЕНИЕ: 30 секунд
+		CheckIntervalWhenDischarging: 1800, // ИЗМЕНЕНИЕ: 30 минут = 1800 секунд
 		UseSimulator:                 false,
 		LogEnabled:                   true,
 		DebugEnabled:                 false,

@@ -38,17 +38,25 @@ func main() {
 
 	// 4. Проверяем, установлено ли приложение
 	if !isAppInstalled(log) {
+
+		// // Удаляем старый лог-файл.
+		// err = os.Remove(paths.LogPath())
+		// if err != nil && !os.IsNotExist(err) {
+		// 	// Если файл не существует, это не ошибка. В иных случаях - выводим предупреждение.
+		// 	log.Debug("Предупреждение: не удалось удалить старый лог-файл")
+		// }
+
 		log.Info("Приложение не установлено. Производим установку...")
-		err := Install(log, conf)
+		err = Install(log, conf)
 		if err != nil {
 			log.Fatal(fmt.Sprintf("Не удалось установить приложение: %v", err))
 		}
-	}
 
+	}
 	// 5. Проверяем, запущен ли этот процесс как дочерний (фоновый)
 	if os.Getenv(childProcessEnv) == "1" {
 		// Запускаем фоновую задачу
-		runBackgroundMainTask(conf)
+		runBackgroundMainTask(conf, cfgManager)
 		return
 	}
 

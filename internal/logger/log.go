@@ -36,13 +36,6 @@ type Logger struct {
 // @return *Logger - Указатель на новый экземпляр логгера.
 func New(filePath string, maxLines int, logEnabled bool, debugEnabled bool) *Logger {
 
-	// Удаляем старый лог-файл.
-	err := os.Remove(filePath)
-	if err != nil && !os.IsNotExist(err) {
-		// Если файл не существует, это не ошибка. В иных случаях - выводим предупреждение.
-		log.Printf("Предупреждение: не удалось удалить старый лог-файл: %v", err)
-	}
-
 	// Задаем начальное количество строк.
 	lines := 0
 

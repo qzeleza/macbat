@@ -75,12 +75,13 @@ func launchInBackground() {
 }
 
 // runBackgroundMainTask - это основная логика приложения, которая работает в фоне
-func runBackgroundMainTask(config *config.Config) {
+// runBackgroundMainTask - это основная логика приложения, которая работает в фоне
+// ИЗМЕНЕНИЕ: теперь эта функция просто инициализирует и запускает монитор.
+func runBackgroundMainTask(cfg *config.Config, cfgManager *config.Manager) { // Добавили cfgManager
 
 	log.Info("Фоновый процесс проверки заряда батареи начал работу.")
 
-	// 4. Создаем и запускаем монитор.
-	monitor := monitor.NewMonitor(config, log)
-	monitor.Start() // Этот вызов заблокирует программу в бесконечном цикле.
-
+	// Создаем и запускаем монитор.
+	appMonitor := monitor.NewMonitor(cfg, cfgManager, log)
+	appMonitor.Start() // Этот вызов заблокирует программу в бесконечном цикле.
 }
