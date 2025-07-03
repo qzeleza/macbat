@@ -5,9 +5,12 @@ import (
 	"macbat/internal/config"
 	"macbat/internal/monitor"
 	"macbat/internal/paths"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -85,6 +88,42 @@ func launchInBackground() {
 // runBackgroundMainTask - это основная логика приложения, которая работает в фоне
 // ИЗМЕНЕНИЕ: теперь эта функция просто инициализирует и запускает монитор.
 func runBackgroundMainTask(cfg *config.Config, cfgManager *config.Manager, mode string) { // Добавили cfgManager
+	log.Info("Запуск в фоновом режиме...")
+
+	log.Info("Проверка существования PID-файла перед запуском фонового процесса.")
+	pidFile := paths.PIDFilePath()
+	if _, err := os.Stat(pidFile); err == nil {
+		log.Info(fmt.Sprintf("PID-файл уже существует: %s. Читаю содержимое.", pidFile))
+		pidBytes, err := os.ReadFile(pidFile)
+		if err != nil {
+			log.Error(fmt.Sprintf("Ошибка чтения PID-файла: %v", err))
+		} else {
+			pidStr := string(pidBytes)
+			pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
+			if err != nil {
+				log.Error(fmt.Sprintf("Ошибка парсинга PID из файла: %v", err))
+			} else {
+				if isProcessRunningByPID(pid) {
+					log.Info(fmt.Sprintf("Процесс с PID %d из PID-файла уже запущен. Завершаю текущий запуск.", pid))
+					os.Exit(0)
+				} else {
+					log.Info(fmt.Sprintf("Процесс с PID %d из PID-файла не найден. Продолжаю запуск.", pid))
+				}
+			}
+		}
+	} else {
+		log.Info("PID-файл не существует. Создаю новый PID-файл для текущего процесса.")
+	}
+
+	// Записываем PID текущего процесса в файл
+	currentPID := os.Getpid()
+	log.Info(fmt.Sprintf("Запись PID текущего процесса (%d) в файл: %s", currentPID, pidFile))
+	err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", currentPID)), 0644)
+	if err != nil {
+		log.Error(fmt.Sprintf("Ошибка записи PID в файл: %v", err))
+	}
+	log.Info("PID успешно записан в файл.")
+
 	log.Info("Фоновый процесс проверки заряда батареи начал работу.")
 
 	// Настраиваем канал для обработки сигналов завершения
