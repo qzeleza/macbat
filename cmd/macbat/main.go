@@ -41,7 +41,7 @@ func main() {
 	flag.Parse()
 
 	// --- Логика установки/удаления ---
-	if *installFlag || !isAppInstalled(log) {
+	if *installFlag {
 		log.Info("Запрошена установка приложения...")
 		if err := Install(log, conf); err != nil {
 			log.Fatal(fmt.Sprintf("Ошибка во время установки: %v", err))
@@ -86,12 +86,14 @@ func main() {
 	// --- Логика для GUI (иконка в трее) ---
 	log.Info("Запуск иконки в трее...")
 
+	// Перед запуском нового фонового процесса принудительно завершаем старый,
+	// если он остался от предыдущего сбоя. Это гарантирует, что мы не создадим зомби.
+	killBackgroundGo()
+
 	// Запускаем фоновый процесс, если он еще не запущен
 	if !isProcessRunning("macbat --background") {
 		log.Info("Запуск фонового процесса мониторинга батареи...")
-		log.Info("Вызов функции launchInBackground для запуска фонового процесса.")
 		launchInBackground()
-		log.Info("Функция launchInBackground завершена. Фоновый процесс должен быть запущен.")
 	} else {
 		log.Info("Фоновый процесс уже запущен.")
 	}

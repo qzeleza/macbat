@@ -1,0 +1,192 @@
+/**
+ * @file main.go
+ * @brief Главный файл приложения, точка входа.
+ * @details Инициализирует логгер, конфигурацию, проверяет наличие других
+ *          экземпляров и запускает приложение в системном трее macOS.
+ */
+package main
+
+import (
+	"encoding/base64"
+	"fmt"
+	"macbat/internal/battery"
+	"macbat/internal/config"
+	"macbat/internal/logger"
+	"macbat/internal/monitor"
+	"macbat/internal/paths"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/getlantern/systray"
+)
+
+// iconData содержит байты иконки для системного трея.
+var iconData []byte
+
+// log является глобальным экземпляром логгера для всего приложения.
+var log *logger.Logger
+
+// cfgManager является глобальным экземпляром менеджера конфигурации.
+var cfgManager *config.Manager
+
+// init выполняется один раз при запуске пакета.
+// Он декодирует иконку из base64 строки в байтовый срез.
+func init() {
+	// Base64-кодированная строка для простой 16x16 иконки батареи.
+	encodedIcon := "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAEKADAAQAAAABAAAAEAAAAAA5yevUAAAAZklEQVQ4EWMY2dDR/c/A8I9B8g8Gk4iA5D8+M/z/P8P/D8P/gYENgYkBJgEgxYAMBqC5FwMDUgOIDQYQyIAmYkQGk4gEGIBgA0AxIcgwJgNMZDD5D4P5DAAAM/1D3S/pfiIAAAAASUVORK5CYII="
+	var err error
+	iconData, err = base64.StdEncoding.DecodeString(encodedIcon)
+	if err != nil {
+		// В случае ошибки декодирования, мы можем использовать nil,
+		// systray отобразит стандартную иконку или текст.
+		fmt.Printf("Ошибка декодирования иконки: %v\n", err)
+		iconData = nil
+	}
+}
+
+/**
+ * @brief onReady выполняется, когда systray готов к работе.
+ * @details Эта функция настраивает иконку, заголовок, всплывающую подсказку и пункты меню.
+ *          Она также запускает две горутины:
+ *          1. Для периодического обновления данных в меню.
+ *          2. Для запуска существующего монитора уведомлений.
+ */
+func onReady() {
+	// Устанавливаем иконку, заголовок и подсказку для элемента в строке меню.
+	systray.SetIcon(iconData)
+	systray.SetTitle("MacBat")
+	systray.SetTooltip("MacBat: Мониторинг состояния батареи")
+
+	// Создаем пункты меню.
+	// Изначально они содержат текст-заполнитель, который будет обновлен.
+	mChargeLevel := systray.AddMenuItem("Уровень заряда: ...", "Текущий уровень заряда батареи")
+	mThresholds := systray.AddMenuItem("Пороги (min/max): ...", "Установленные пороги заряда")
+	mCycleCount := systray.AddMenuItem("Циклы: ...", "Количество циклов перезарядки")
+	mDegradation := systray.AddMenuItem("Здоровье: ...", "Текущее состояние здоровья батареи")
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem("Выход", "Завершить работу приложения")
+
+	// Запускаем горутину для периодического обновления информации в меню.
+	go func() {
+		// Загружаем конфигурацию один раз, чтобы получить пороги.
+		// В будущем можно добавить перезагрузку при изменении файла.
+		conf, err := cfgManager.Load()
+		if err != nil {
+			log.Error(fmt.Sprintf("Не удалось загрузить конфигурацию для меню: %v", err))
+			// Устанавливаем текст ошибки в меню.
+			mThresholds.SetTitle("Пороги: ошибка загрузки")
+		} else {
+			mThresholds.SetTitle(fmt.Sprintf("Пороги: %d%% / %d%%", conf.MinThreshold, conf.MaxThreshold))
+		}
+
+		// Создаем тикер для обновления каждые 15 секунд.
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		// Функция для однократного обновления.
+		updateMenuItems := func() {
+			info, err := battery.GetBatteryInfo()
+			if err != nil {
+				log.Error(fmt.Sprintf("Ошибка получения данных о батарее для меню: %v", err))
+				return // Пропускаем обновление, если есть ошибка.
+			}
+			// Обновляем заголовки пунктов меню.
+			mChargeLevel.SetTitle(fmt.Sprintf("Уровень заряда: %d%%", info.CurrentCapacity))
+			mCycleCount.SetTitle(fmt.Sprintf("Циклы: %d", info.CycleCount))
+			// Деградация = 100% - Здоровье.
+			degradation := 100 - info.HealthPercent
+			mDegradation.SetTitle(fmt.Sprintf("Деградация: %d%%", degradation))
+		}
+
+		// Немедленно обновляем меню при запуске.
+		updateMenuItems()
+
+		// Бесконечный цикл для обработки тикера и кнопки выхода.
+		for {
+			select {
+			case <-ticker.C:
+				// Обновляем по тикеру.
+				updateMenuItems()
+			case <-mQuit.ClickedCh:
+				// Если нажат пункт "Выход", завершаем работу systray.
+				systray.Quit()
+				return
+			}
+		}
+	}()
+
+	// Запускаем существующий монитор в отдельной горутине для сохранения функциональности уведомлений.
+	go func() {
+		conf, err := cfgManager.Load()
+		if err != nil {
+			log.Fatal(fmt.Sprintf("Критическая ошибка: не удалось загрузить конфигурацию для монитора: %v", err))
+		}
+		// Создаем и запускаем монитор.
+		appMonitor := monitor.NewMonitor(conf, cfgManager, log)
+		appMonitor.Start("run") // Этот вызов заблокирует горутину в бесконечном цикле.
+	}()
+
+	log.Info("Приложение успешно запущено и готово к работе в системном трее.")
+}
+
+/**
+ * @brief onExit выполняется при завершении работы systray.
+ * @details Здесь можно разместить код для очистки ресурсов.
+ */
+func onExit() {
+	log.Info("Приложение завершает работу. Производится очистка.")
+	// В будущем здесь можно добавить логику сохранения состояния.
+}
+
+/**
+ * @brief main является основной точкой входа в приложение.
+ */
+func main() {
+	// 1. Создаем логгер.
+	log = logger.New(paths.LogPath(), 100, true, false)
+
+	// 2. Инициализируем менеджер конфигурации.
+	var err error
+	cfgManager, err = config.New(log, paths.ConfigPath())
+	if err != nil {
+		log.Fatal(fmt.Sprintf("Не удалось инициализировать менеджер конфигурации: %v", err))
+	}
+
+	// 3. Загружаем конфигурацию.
+	conf, err := cfgManager.Load()
+	if err != nil {
+		log.Fatal(fmt.Sprintf("Не удалось загрузить конфигурацию: %v", err))
+	}
+
+	// 4. Проверяем, установлено ли приложение.
+	if !isAppInstalled(log) {
+		log.Info("Приложение не установлено. Производим установку...")
+		err = Install(log, conf)
+		if err != nil {
+			log.Fatal(fmt.Sprintf("Не удалось установить приложение: %v", err))
+		}
+	}
+
+	// 5. Проверяем, не запущен ли уже другой экземпляр приложения.
+	currentPid := int32(os.Getpid())
+	executablePath, err := os.Executable()
+	if err != nil {
+		log.Fatal(fmt.Sprintf("Не удалось получить путь к исполняемому файлу: %v", err))
+	}
+	executableName := filepath.Base(executablePath)
+
+	pids, err := findOtherInstances(executableName, currentPid)
+	if err != nil {
+		log.Fatal(fmt.Sprintf("Ошибка при поиске других экземпляров: %v", err))
+	}
+
+	if len(pids) > 0 {
+		log.Info("Обнаружен другой запущенный экземпляр приложения. Выход.")
+		os.Exit(1)
+	}
+
+	// 6. Запускаем приложение в системном трее.
+	// Эта функция блокирует основной поток до вызова systray.Quit().
+	systray.Run(onReady, onExit)
+}
