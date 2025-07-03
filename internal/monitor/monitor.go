@@ -93,6 +93,7 @@ type Monitor struct {
 	lastKnownCharging    bool            // Последнее известное состояние (заряжается/не заряжается).
 	isInitialized        bool            // Флаг, показывающий, был ли монитор запущен хотя бы раз.
 	lastLevel            int             // Последний известный уровень заряда для оптимизации.
+	stopChan             chan struct{}
 }
 
 // batteryInfoProvider определяет абстрактный тип "поставщика" данных о батарее.
@@ -106,7 +107,7 @@ type batteryInfoProvider func() (*battery.BatteryInfo, error)
 //
 // @param cfg Конфигурация монитора.
 // @param cfgManager Менеджер конфигурации.
-// @param logger Реализация интерфейса Logger для отправки уведомлений.
+// @param logger Логгер для вывода сообщений.
 // @return Указатель на полностью готовый к работе экземпляр Monitor.
 func NewMonitor(cfg *config.Config, cfgManager *config.Manager, logger *logger.Logger) *Monitor {
 	return &Monitor{
@@ -114,6 +115,7 @@ func NewMonitor(cfg *config.Config, cfgManager *config.Manager, logger *logger.L
 		notifier:   logger,
 		cfgManager: cfgManager,
 		lastLevel:  -1,
+		stopChan:   make(chan struct{}),
 	}
 }
 
@@ -121,7 +123,7 @@ func NewMonitor(cfg *config.Config, cfgManager *config.Manager, logger *logger.L
 // Этот метод является блокирующим и должен выполняться в главной горутине фонового процесса.
 //
 // @return Ничего.
-func (m *Monitor) Start() {
+func (m *Monitor) Start(mode string) {
 	m.notifier.Info("Запуск основного цикла монитора.")
 
 	// Создаем канал, по которому будем получать обновленную конфигурацию.
@@ -131,15 +133,15 @@ func (m *Monitor) Start() {
 
 	// Определяем источник данных о батарее (реальный или симулятор).
 	var provider batteryInfoProvider
-	if m.config.UseSimulator {
+	if mode == "test" || m.config.UseSimulator {
 		m.notifier.Test("Режим работы: СИМУЛЯТОР.")
 		simulator := simulator.NewBatterySimulator(
-			m.notifier,
-			23, // Начальный уровень заряда
-			false,
-			m.config.MinThreshold,
-			m.config.MaxThreshold,
-			m.config.MaxNotifications,
+			m.notifier,                // Объект для отправки уведомлений
+			23,                        // Начальный уровень заряда
+			false,                     // Начальное состояние зарядки
+			m.config.MinThreshold,     // Минимальный порог заряда
+			m.config.MaxThreshold,     // Максимальный порог заряда
+			m.config.MaxNotifications, // Максимальное количество уведомлений
 		)
 		provider = func() (*battery.BatteryInfo, error) {
 			// Передаем симулятору обратную связь о количестве показанных уведомлений.
@@ -163,6 +165,11 @@ func (m *Monitor) Start() {
 	for {
 		// select позволяет нам ждать события от нескольких источников одновременно.
 		select {
+		// Событие 0: Получен сигнал остановки
+		case <-m.stopChan:
+			m.notifier.Info("Получен сигнал остановки монитора. Завершение работы.")
+			return
+
 		// Событие 1: Получили обновленную конфигурацию из канала.
 		case newCfg, ok := <-configUpdateChan:
 			if !ok {
@@ -196,7 +203,8 @@ func (m *Monitor) applyNewConfig(newCfg *config.Config, ticker *time.Ticker) {
 	// Перезапускаем тикер с новым интервалом из новой конфигурации.
 	newInterval := m.getCheckInterval()
 	ticker.Reset(time.Duration(newInterval) * time.Second)
-	m.notifier.Info(fmt.Sprintf("Интервал проверки обновлен до %v.", newInterval))
+	m.notifier.Info("Новая конфигурация успешно применена.")
+
 }
 
 // watchConfigFile - это функция, работающая в фоне и следящая за изменениями в config.json.
@@ -250,9 +258,11 @@ func (m *Monitor) watchConfigFile(updateChan chan<- *config.Config) {
 //
 // @return Интервал проверки в зависимости от состояния зарядки.
 func (m *Monitor) getCheckInterval() int {
+	// Если зарядка включена, возвращаем интервал проверки при зарядке.
 	if m.lastKnownCharging {
 		return m.config.CheckIntervalWhenCharging
 	}
+	// Иначе возвращаем интервал проверки при разрядке.
 	return m.config.CheckIntervalWhenDischarging
 }
 
@@ -261,28 +271,38 @@ func (m *Monitor) getCheckInterval() int {
 // @param now Текущее время.
 // @param info Информация о батарее.
 func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
+
+	// Если состояние батареи не изменилось, проверка пропускается.
 	if m.isInitialized && info.CurrentCapacity == m.lastLevel && info.IsCharging == m.lastKnownCharging {
 		m.notifier.Debug("Состояние батареи не изменилось. Проверка пропущена.")
 		return
 	}
+
+	// Информируем о текущем состоянии батареи.
 	m.notifier.Debug(fmt.Sprintf(
 		"Проверка состояния: Зарядка=%v, Уровень=%d%%",
 		info.IsCharging, info.CurrentCapacity,
 	))
 
+	// Запоминаем текущий уровень заряда.
 	m.lastLevel = info.CurrentCapacity
 
+	// Если это первая инициализация
 	if !m.isInitialized {
-		m.isInitialized = true
-		m.lastKnownCharging = info.IsCharging
+		m.isInitialized = true                // Устанавливаем флаг инициализации.
+		m.lastKnownCharging = info.IsCharging // Запоминаем текущее состояние зарядки.
 	} else if m.lastKnownCharging != info.IsCharging {
+		// Если режим зарядки изменился
 		m.notifier.Check("Обнаружена смена режима заряда. Состояние сброшено.\n")
-		m.resetState(info.IsCharging)
+		m.resetState(info.IsCharging) // Сбрасываем состояние при смене режима заряда.
 	}
 
+	// Проверяем состояние заряда.
 	if info.IsCharging {
+		// Если зарядка включена, проверяем состояние заряда.
 		m.checkChargingState(now, info)
 	} else {
+		// Если зарядка выключена, проверяем состояние разряда.
 		m.checkDischargingState(now, info)
 	}
 }
@@ -302,23 +322,31 @@ func (m *Monitor) resetState(newChargingState bool) {
 // @param now Текущее время.
 // @param info Информация о батарее.
 func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo) {
+
+	// Если уровень заряда выше порога, проверка пропускается.
 	if info.CurrentCapacity > m.config.MinThreshold {
 		return
 	}
 
+	// Если количество уведомлений не превышено и время с последнего уведомления прошло
 	if m.notificationsShown < m.config.MaxNotifications && now.Sub(m.lastNotificationTime) >= time.Duration(m.config.NotificationInterval)*time.Second {
-		remaining := m.config.MaxNotifications - m.notificationsShown - 1
+		remaining := m.config.MaxNotifications - m.notificationsShown - 1 // Оставшееся количество уведомлений
+		// Формируем сообщение
 		message := fmt.Sprintf(
 			"Батарея разряжена до %d%%.\nПожалуйста, подключите зарядку.\nОсталось уведомлений: %d",
 			info.CurrentCapacity,
 			remaining,
 		)
+		// Отправляем уведомление
 		m.notifier.Check(message)
+		// Отображаем уведомление
 		if err := m.notifier.ShowLowBatteryNotification(message); err != nil {
 			m.notifier.Error(err.Error())
 		}
-		m.lastNotificationTime = now
-		m.notificationsShown++
+
+		m.lastNotificationTime = now    // Обновляем время последнего уведомления
+		m.notificationsShown++          // Увеличиваем счетчик уведомлений
+		m.updateDischargeInterval(info) // Обновляем интервал проверки при разрядке в случае, если уровень заряда ниже порога.
 	}
 }
 
@@ -327,22 +355,57 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 // @param now Текущее время.
 // @param info Информация о батарее.
 func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
+
+	// Если уровень заряда ниже порога, проверка пропускается.
 	if info.CurrentCapacity < m.config.MaxThreshold {
 		return
 	}
 
+	// Если количество уведомлений не превышено и время с последнего уведомления прошло
 	if m.notificationsShown < m.config.MaxNotifications && now.Sub(m.lastNotificationTime) >= time.Duration(m.config.NotificationInterval)*time.Second {
+		// Определяем количество оставшихся уведомлений.
 		remaining := m.config.MaxNotifications - m.notificationsShown - 1
+		// Формируем сообщение.
 		message := fmt.Sprintf(
 			"Батарея заряжена до %d%%.\nМожете отключить зарядку.\nОсталось уведомлений: %d",
 			info.CurrentCapacity,
 			remaining,
 		)
-		m.notifier.Check(message)
+		m.notifier.Check(message) // Отправляем уведомление.
 		if err := m.notifier.ShowHighBatteryNotification(message); err != nil {
 			m.notifier.Error(err.Error())
 		}
-		m.lastNotificationTime = now
-		m.notificationsShown++
+
+		m.lastNotificationTime = now // Обновляем время последнего уведомления.
+		m.notificationsShown++       // Увеличиваем счетчик уведомлений.
+		m.updateChargeInterval(info) // Обновляем интервал проверки при зарядке в случае, если достигнутый уровень заряда выше порога.
 	}
+}
+
+// updateDischargeInterval обновляет интервал проверки при разрядке.
+//
+// @param info Информация о батарее.
+func (m *Monitor) updateDischargeInterval(info battery.BatteryInfo) {
+	gapCapacity := m.config.MinThreshold - info.CurrentCapacity                                          // Разница между минимальным порогом и текущим уровнем заряда.
+	timeTick := m.config.CheckIntervalWhenDischarging / m.config.MinThreshold                            // Единица интервала проверки.
+	m.config.CheckIntervalWhenDischarging = m.config.CheckIntervalWhenDischarging - timeTick*gapCapacity // Уменьшаем интервал проверки пропорционально разнице.
+	m.cfgManager.Save(&m.config)                                                                         // Сохраняем конфигурацию в файле конфигурации.
+}
+
+// updateChargeInterval обновляет интервал проверки при зарядке.
+//
+// @param info Информация о батарее.
+func (m *Monitor) updateChargeInterval(info battery.BatteryInfo) {
+	gapCapacity := m.config.MaxThreshold - info.CurrentCapacity                                   // Разница между максимальным порогом и текущим уровнем заряда.
+	timeBit := m.config.CheckIntervalWhenCharging / m.config.MaxThreshold                         // Единица интервала проверки.
+	m.config.CheckIntervalWhenCharging = m.config.CheckIntervalWhenCharging - timeBit*gapCapacity // Уменьшаем интервал проверки пропорционально разнице.
+	m.cfgManager.Save(&m.config)                                                                  // Сохраняем конфигурацию в файле конфигурации.
+}
+
+// Stop останавливает работу монитора.
+//
+// @return Ничего.
+func (m *Monitor) Stop() {
+	m.notifier.Info("Остановка монитора...")
+	close(m.stopChan)
 }

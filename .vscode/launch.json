@@ -2,13 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Отладка install",
+      "name": "Отладка",
       "type": "go",
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/cmd/macbat",
       "args": [
-        "install"
       ],
       "showLog": false
     },

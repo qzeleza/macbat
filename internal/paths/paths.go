@@ -8,24 +8,43 @@ import (
 	"path/filepath"
 )
 
+// AppName - это константа, определяющая имя приложения.
 const AppName = "macbat"
 
 // BinaryPath возвращает путь к бинарному файлу приложения.
 // @return string - путь к бинарнику
 func BinaryPath() string {
-	return filepath.Join(os.Getenv("HOME"), "bin", AppName)
+	// os.Executable() возвращает полный путь к текущему исполняемому файлу.
+	// Это именно то, что нужно для запуска копии процесса.
+	binPath, err := os.Executable()
+	if err != nil {
+		// В случае ошибки возвращаем базовое имя, предполагая, что оно в PATH.
+		return AppName
+	}
+	return binPath
 }
 
 // ConfigPath возвращает путь к файлу конфигурации.
+// Мы будем хранить config.json рядом с исполняемым файлом для портативности.
 // @return string - путь к config.json
 func ConfigPath() string {
-	return filepath.Join(os.Getenv("HOME"), ".config", AppName, "config.json")
+	// Получаем путь к исполняемому файлу
+	exePath, err := os.Executable()
+	if err != nil {
+		// В случае ошибки, возвращаем путь в домашней директории как запасной вариант
+		return filepath.Join(os.Getenv("HOME"), ".config", AppName, "config.json")
+	}
+	// Возвращаем путь к config.json в той же директории, что и бинарник
+	return filepath.Join(filepath.Dir(exePath), "config.json")
 }
 
 // LogDir возвращает путь к директории логов.
 // @return string - путь к директории логов
 func LogDir() string {
-	return "/tmp"
+	// Для macOS предпочтительнее использовать ~/Library/Logs
+	logDir := filepath.Join(os.Getenv("HOME"), "Library", "Logs", AppName)
+	_ = os.MkdirAll(logDir, 0755)
+	return logDir
 }
 
 // ensureLogDir создает директорию логов, если она не существует.
@@ -61,4 +80,10 @@ func ErrorLogPath() string {
 // @return string - идентификатор агента
 func AgentIdentifier() string {
 	return "com." + AppName + ".agent"
+}
+
+// PIDPath возвращает путь к файлу PID.
+// @return string - путь к macbat.pid
+func PIDPath() string {
+	return "/tmp/" + AppName + ".pid"
 }
