@@ -111,44 +111,39 @@ func onReady() {
 
 	mQuit := systray.AddMenuItem("Выход", "Завершить работу приложения")
 
-	// Запускаем всю логику инициализации и обновления в фоновом режиме,
-	// чтобы не блокировать основной поток GUI.
+	// Создаем логгер для получения конфигурации
+	log := logger.New(paths.LogPath(), 100, true, false)
+
+	// Создаем менеджер конфигурации
+	// Загружаем конфигурацию для отображения порогов
+	cfgManager, _ := config.New(log, paths.ConfigPath())
+	conf, _ := cfgManager.Load()
+
+	// Переносим первое обновление меню на короткую задержку,
+	// чтобы гарантировать завершение инициализации GUI и избежать блокировки.
 	go func() {
-		// Создаем логгер для получения конфигурации
-		log := logger.New(paths.LogPath(), 100, true, false)
-
-		// Создаем менеджер конфигурации и загружаем ее
-		cfgManager, err := config.New(log, paths.ConfigPath())
-		if err != nil {
-			log.Error(fmt.Sprintf("Ошибка создания менеджера конфигурации: %v", err))
-		}
-
-		conf, err := cfgManager.Load()
-		if err != nil {
-			log.Error(fmt.Sprintf("Ошибка загрузки конфигурации: %v", err))
-		}
-
-		// Первоначальное обновление меню с загруженными данными
+		time.Sleep(100 * time.Millisecond)
 		updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, conf)
+	}()
 
-		// Запускаем тикер для периодического обновления и слушаем канал выхода
+	// Запускаем тикер для обновления меню каждые 30 секунд
+	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, conf)
-			case <-mQuit.ClickedCh:
-				log.Info("Получен сигнал на выход из приложения. Завершаем работу.")
-				// Завершаем фоновый процесс, если он был запущен
-				killBackground()
-				// Даем команду systray на завершение работы.
-				// Это приведет к вызову onExit и завершению systray.Run()
-				systray.Quit()
-				return // Выход из горутины
-			}
+		for range ticker.C {
+			updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, conf)
 		}
+	}()
+
+	go func() {
+		<-mQuit.ClickedCh
+		// Завершаем фоновый процесс, запущенный с --background
+		killBackground()
+		systray.Quit()
+		// Допустим, systray.Run() иногда не завершает процесс мгновенно,
+		// поэтому завершаем его явно.
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(0)
 	}()
 }
 

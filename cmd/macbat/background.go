@@ -56,8 +56,10 @@ func launchInBackground() {
 	// 	log.Fatal(fmt.Sprintf("Не удалось получить путь к исполняемому файлу: %v", err))
 	// }
 
+	binPath := paths.BinaryPath()
+	log.Info(fmt.Sprintf("Путь к исполняемому файлу для фонового процесса: %s", binPath))
 	// Создаем команду для запуска этого же приложения с флагом --background
-	cmd := exec.Command(paths.BinaryPath(), "--background")
+	cmd := exec.Command(binPath, "--background")
 	// Используем те же переменные окружения, дополнительных не нужно
 	cmd.Env = os.Environ()
 
@@ -66,13 +68,16 @@ func launchInBackground() {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
+	log.Info("Команда для запуска фонового процесса создана. Запускаю процесс...")
 	// Запускаем процесс и не ждем его завершения
 	err := cmd.Start()
 	if err != nil {
-		log.Fatal(fmt.Sprintf("Не удалось запустить фоновый процесс: %v", err))
+		log.Error(fmt.Sprintf("Не удалось запустить фоновый процесс: %v", err))
+		log.Info("Попытка запуска фонового процесса не удалась. Продолжаю без завершения программы.")
+		return
 	}
 
-	log.Info(fmt.Sprintf("Фоновый процесс запущен с PID: %d", cmd.Process.Pid))
+	log.Info(fmt.Sprintf("Фоновый процесс успешно запущен с PID: %d", cmd.Process.Pid))
 	// Родительский процесс успешно завершается
 }
 

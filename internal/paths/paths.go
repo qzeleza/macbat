@@ -4,6 +4,7 @@
 package paths
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -18,9 +19,16 @@ func BinaryPath() string {
 	// Это именно то, что нужно для запуска копии процесса.
 	binPath, err := os.Executable()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Ошибка получения пути к исполняемому файлу: %v\n", err)
 		// В случае ошибки возвращаем базовое имя, предполагая, что оно в PATH.
 		return AppName
 	}
+	// Проверяем, существует ли файл
+	if _, err := os.Stat(binPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Исполняемый файл не найден по пути: %s\n", binPath)
+		return AppName
+	}
+	fmt.Fprintf(os.Stderr, "Исполняемый файл найден по пути: %s\n", binPath)
 	return binPath
 }
 
