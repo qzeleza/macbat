@@ -41,7 +41,7 @@ func main() {
 	flag.Parse()
 
 	// --- Логика установки/удаления ---
-	if *installFlag {
+		if *installFlag {
 		log.Info("Запрошена установка приложения...")
 		if err := Install(log, conf); err != nil {
 			log.Fatal(fmt.Sprintf("Ошибка во время установки: %v", err))
