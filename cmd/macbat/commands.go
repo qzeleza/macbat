@@ -20,7 +20,7 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 	log.Info("Начало установки приложения")
 
 	// Получаем путь к бинарнику
-	binPath, binDir, currentBin, err := getBinaryPaths(log)
+	binPath, binDir, _, err := getBinaryPaths(log)
 	if err != nil {
 		return err
 	}
@@ -36,21 +36,21 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 	}
 
 	// Создаем директорию для бинарника
-	if err := createBinaryDirectory(binDir, log); err != nil {
-		return err
-	}
+	// if err := createBinaryDirectory(binDir, log); err != nil {
+	// 	return err
+	// }
 
 	// Проверяем права на запись
-	if err := CheckWriteAccess(binDir, log); err != nil {
-		mess := fmt.Sprintf("нет прав на запись в %s: %v", binDir, err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
+	// if err := CheckWriteAccess(binDir, log); err != nil {
+	// 	mess := fmt.Sprintf("нет прав на запись в %s: %v", binDir, err)
+	// 	log.Error(mess)
+	// 	return fmt.Errorf("%s", mess)
+	// }
 
 	// Копируем бинарник
-	if err := copyBinary(currentBin, binPath, log); err != nil {
-		return err
-	}
+	// if err := copyBinary(currentBin, binPath, log); err != nil {
+	// 	return err
+	// }
 
 	// Добавляем директорию в PATH
 	addPathToEnvironment(binDir, log)

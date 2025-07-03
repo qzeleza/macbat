@@ -119,8 +119,8 @@ func onReady() {
 	cfgManager, _ := config.New(log, paths.ConfigPath())
 	conf, _ := cfgManager.Load()
 
-	// Обновляем меню сразу при старте
-	updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, conf)
+	// Обновляем меню сразу при старте в отдельной горутине, чтобы не блокировать UI
+	go updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, conf)
 
 	// Запускаем тикер для обновления меню каждые 30 секунд
 	go func() {
