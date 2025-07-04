@@ -157,9 +157,8 @@ func (m *Monitor) Start(mode string) {
 	defer ticker.Stop() // Гарантируем освобождение ресурсов тикера при выходе.
 
 	m.notifier.Info(fmt.Sprintf(
-		"Мониторинг запущен. Текущий интервал: %v., разрядка - %v.",
+		"Мониторинг запущен. Текущий интервал проверки: %v секунд",
 		m.getCheckInterval(),
-		m.config.CheckIntervalWhenDischarging,
 	))
 
 	for {

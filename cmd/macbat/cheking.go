@@ -16,7 +16,9 @@ func isAppInstalled(log *logger.Logger) bool {
 
 	// Определяем задачи для проверки в виде карты.
 	// Каждому файлу соответствует свой список искомых строк.
+	// Для бинарного файла список строк пуст - проверяем только его наличие.
 	searchTasks := map[string][]string{
+		paths.BinaryPath(): {},
 		paths.PlistPath(): {
 			"<key>ProgramArguments</key>",
 			fmt.Sprintf("<string>%s</string>", paths.AgentIdentifier()),
@@ -53,17 +55,21 @@ func isAppInstalled(log *logger.Logger) bool {
 		// В реальном приложении здесь можно было бы выйти: os.Exit(1)
 	}
 
-	var agentOk bool
-	// Проверяем запущен ли агент
-	if IsAgentRunning(log) {
-		log.Debug("Агент запущен...")
-		agentOk = true
-	} else {
-		log.Debug("Агент не запущен...")
-		agentOk = false
+	if ok {
+		// Проверяем запущен ли агент
+		if IsAgentRunning(log) {
+			log.Debug("Агент запущен...")
+		} else {
+			log.Debug("Агент не запущен. Запуск...")
+			if err := loadAgent(log); err != nil {
+				log.Fatal(fmt.Sprintf("Ошибка во время загрузки агента: %v", err))
+				return false
+			}
+			return true
+		}
 	}
 	// Возвращаем результат проверки
-	return ok && agentOk
+	return ok
 }
 
 /**

@@ -55,11 +55,9 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 	// Добавляем директорию в PATH
 	addPathToEnvironment(binDir, log)
 
-	// Создаем plist файл для агента
+	// 3. Создаем plist файл для агента
 	if err := createPlistFile(binPath, log, cfg); err != nil {
-		mess := fmt.Sprintf("не удалось создать plist: %v", err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
+		return fmt.Errorf("не удалось создать plist: %w", err)
 	}
 
 	// Загружаем агента при помощи launchd
@@ -84,7 +82,6 @@ func getBinaryPaths(log *logger.Logger) (string, string, string, error) {
 func removeOldFiles(log *logger.Logger, binPath string) error {
 	filesToRemove := []string{
 		paths.PlistPath(),
-		binPath,
 	}
 
 	for _, path := range filesToRemove {
@@ -110,31 +107,31 @@ func createLogDirectory(log *logger.Logger) error {
 	return nil
 }
 
-func createBinaryDirectory(binDir string, log *logger.Logger) error {
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		mess := fmt.Sprintf("не удалось создать директорию %s: %v", binDir, err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	return nil
-}
+// func createBinaryDirectory(binDir string, log *logger.Logger) error {
+// 	if err := os.MkdirAll(binDir, 0755); err != nil {
+// 		mess := fmt.Sprintf("не удалось создать директорию %s: %v", binDir, err)
+// 		log.Error(mess)
+// 		return fmt.Errorf("%s", mess)
+// 	}
+// 	return nil
+// }
 
-func copyBinary(currentBin, binPath string, log *logger.Logger) error {
-	log.Debug(fmt.Sprintf("Копирование бинарника из %s в %s", currentBin, binPath))
-	data, err := os.ReadFile(currentBin)
-	if err != nil {
-		mess := fmt.Sprintf("не удалось прочитать бинарник: %v", err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	if err := os.WriteFile(binPath, data, 0755); err != nil {
-		mess := fmt.Sprintf("не удалось записать бинарник в %s: %v", binPath, err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	log.Debug(fmt.Sprintf("Бинарник успешно записан: %s", binPath))
-	return nil
-}
+// func copyBinary(currentBin, binPath string, log *logger.Logger) error {
+// 	log.Debug(fmt.Sprintf("Копирование бинарника из %s в %s", currentBin, binPath))
+// 	data, err := os.ReadFile(currentBin)
+// 	if err != nil {
+// 		mess := fmt.Sprintf("не удалось прочитать бинарник: %v", err)
+// 		log.Error(mess)
+// 		return fmt.Errorf("%s", mess)
+// 	}
+// 	if err := os.WriteFile(binPath, data, 0755); err != nil {
+// 		mess := fmt.Sprintf("не удалось записать бинарник в %s: %v", binPath, err)
+// 		log.Error(mess)
+// 		return fmt.Errorf("%s", mess)
+// 	}
+// 	log.Debug(fmt.Sprintf("Бинарник успешно записан: %s", binPath))
+// 	return nil
+// }
 
 func addPathToEnvironment(binDir string, log *logger.Logger) {
 	if err := addToPath(binDir, log); err != nil {
@@ -369,7 +366,7 @@ func Load(log *logger.Logger) (bool, error) {
 
 	if !IsAgentRunning(log) {
 		cmd := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
-		if err := cmd.Run(); err != nil {
+		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
 			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
 			log.Error(mess)
 			return false, fmt.Errorf("%s", mess)

@@ -83,13 +83,16 @@ func main() {
 	flag.Parse()
 
 	// --- Логика установки/удаления ---
-	if *installFlag {
+	if *installFlag || !isAppInstalled(log) {
 		log.Info("Запрошена установка приложения...")
 		if err := Install(log, conf); err != nil {
 			log.Fatal(fmt.Sprintf("Ошибка во время установки: %v", err))
 		}
 		log.Info("Установка успешно завершена.")
-		return
+		// Если запрошена установка, то выходим
+		if *installFlag {
+			return
+		}
 	}
 	if *uninstallFlag {
 		log.Info("Запрошено удаление приложения...")
@@ -149,7 +152,6 @@ func main() {
 	launchDetached("--gui-agent")
 	log.Info("Приложение успешно запущено в фоновом режиме. Лаунчер завершает работу.")
 }
-
 
 func onExit() {
 	// Здесь можно выполнить очистку перед выходом

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/getlantern/systray"
 )
@@ -30,9 +31,32 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth *systray.MenuItem, conf *
 		return
 	}
 
+	// --- Динамическое выравнивание ---
+	// 1. Собираем все заголовки для вычисления максимальной длины.
+	labels := []string{
+		"Текущий заряд:",
+		"Мин. порог:",
+		"Макс. порог:",
+		"Циклов заряда:",
+		"Здоровье батареи:",
+	}
+
+	// 2. Находим самую длинную строку, корректно обрабатывая кириллицу.
+	maxLength := 0
+	for _, label := range labels {
+		length := utf8.RuneCountInString(label)
+		if length > maxLength {
+			maxLength = length
+		}
+	}
+
+	// 3. Рассчитываем отступ: самая длинная строка + 3 пробела.
+	padding := maxLength + 3
+	// --- Конец динамического выравнивания ---
+
 	// Обновляем заголовок с иконкой батареи
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
-	mCurrent.SetTitle(fmt.Sprintf("%-21s %4d%% %s", "Текущий заряд:", info.CurrentCapacity, icon))
+	mCurrent.SetTitle(fmt.Sprintf("%-*s %4d%% %s", padding, "Текущий заряд:", info.CurrentCapacity, icon))
 
 	// Получаем пороги из конфигурации
 	minThreshold := 20 // Значение по умолчанию
@@ -42,14 +66,11 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth *systray.MenuItem, conf *
 		maxThreshold = conf.MaxThreshold
 	}
 
-	// Обновляем информацию в меню
-	// Используем форматирование для выравнивания значений по правому краю.
-	// Самая длинная метка - "Здоровье батареи:" (17 символов).
-	// Мы делаем левую часть (метку) шириной 18 символов, а правую (значение) - 4 символа.
-	mMin.SetTitle(fmt.Sprintf("%-21s %4d%%", "Мин. порог:", minThreshold))
-	mMax.SetTitle(fmt.Sprintf("%-21s %4d%%", "Макс. порог:", maxThreshold))
-	mCycles.SetTitle(fmt.Sprintf("%-21s %4d", "Циклов заряда:", info.CycleCount))
-	mHealth.SetTitle(fmt.Sprintf("%-21s %4d%%", "Здоровье батареи:", info.HealthPercent))
+	// Обновляем информацию в меню с использованием динамического отступа
+	mMin.SetTitle(fmt.Sprintf("%-*s %4d%%", padding, "Мин. порог:", minThreshold))
+	mMax.SetTitle(fmt.Sprintf("%-*s %4d%%", padding, "Макс. порог:", maxThreshold))
+	mCycles.SetTitle(fmt.Sprintf("%-*s %4d", padding, "Циклов заряда:", info.CycleCount))
+	mHealth.SetTitle(fmt.Sprintf("%-*s %4d%%", padding, "Здоровье батареи:", info.HealthPercent))
 }
 
 // getBatteryIcon возвращает иконку батареи в зависимости от уровня заряда
