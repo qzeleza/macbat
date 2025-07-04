@@ -137,7 +137,7 @@ func main() {
 			log.Info("Фоновый процесс уже запущен.")
 		}
 		// Запускаем блокирующий цикл GUI
-		systray.Run(onReady, onExit)
+		systray.Run(initTray, onExit)
 		return
 	}
 

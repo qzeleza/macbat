@@ -1,6 +1,6 @@
 package utils
 
-
+import "unicode/utf8"
 
 // BoolToYesNo преобразует булево значение в "Да" или "Нет"
 // @param b bool - булево значение
@@ -12,4 +12,13 @@ func BoolToYesNo(b bool) string {
 	return "нет"
 }
 
-
+func GetMaxLabelLength(labels []string) int {
+	maxLength := 0
+	for _, label := range labels {
+		length := utf8.RuneCountInString(label)
+		if length > maxLength {
+			maxLength = length
+		}
+	}
+	return maxLength
+}

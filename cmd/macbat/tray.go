@@ -14,39 +14,129 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/getlantern/systray"
+	"github.com/caseymrm/menuet"
 )
 
-// updateMenu обновляет состояние меню в трее
-var updateMu sync.Mutex // защита от параллельного вызова
+// Глобальные переменные для хранения состояния приложения
+var (
+	appLog      *logger.Logger
+	batteryInfo *battery.BatteryInfo
+	appConfig   *config.Config
+	updateMu    sync.Mutex // защита от параллельного вызова
+)
 
-func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth *systray.MenuItem, conf *config.Config) {
+// initTray инициализирует меню в трее macOS
+func initTray() {
+	// Создаем логгер
+	appLog = logger.New(paths.LogPath(), 100, true, false)
+
+	// Инициализируем конфигурацию
+	cfgManager, _ := config.New(appLog, paths.ConfigPath())
+	appConfig, _ = cfgManager.Load()
+
+	// Инициализируем меню
+	ap := menuet.App()
+	ap.Name = "MacBat"
+	ap.Label = "MacBat"
+
+	// Настраиваем состояние меню и обработчики
+	menuState := &menuet.MenuState{
+		Title: "MBat",
+		// Указываем путь к иконке, если бы она была в ресурсах
+		// Встроенный бинарный ресурс не поддерживается напрямую, нужно сохранить
+	}
+	ap.SetMenuState(menuState)
+
+	// Установка функции для генерации меню
+	ap.Children = menuItems
+
+	// Запускаем автоматическое обновление статуса
+	go startStatusUpdater()
+
+	// Запускаем GUI-цикл
+	ap.RunApplication()
+}
+
+// menuItems создает элементы меню
+func menuItems() []menuet.MenuItem {
 	updateMu.Lock()
 	defer updateMu.Unlock()
 
+	// Получаем информацию о батарее
 	info, err := battery.GetBatteryInfo()
 	if err != nil {
-		mCurrent.SetTitle("Ошибка получения данных")
-		return
+		return []menuet.MenuItem{
+			{Text: "⚠️ Ошибка получения данных"},
+			{Type: menuet.Separator},
+			{Text: "Выход", Clicked: exitApp},
+		}
 	}
 
-	// Получаем пороги из конфигурации
-	minThreshold := 20 // Значение по умолчанию
-	maxThreshold := 80 // Значение по умолчанию
-	if conf != nil {
-		minThreshold = conf.MinThreshold
-		maxThreshold = conf.MaxThreshold
+	// Сохраняем для использования в других функциях
+	batteryInfo = info
+
+	// Определяем пороги из конфигурации или значения по умолчанию
+	minThreshold := 20
+	maxThreshold := 80
+	if appConfig != nil {
+		minThreshold = appConfig.MinThreshold
+		maxThreshold = appConfig.MaxThreshold
 	}
 
-	// Обновляем пункты меню, используя простой и надежный формат "Метка: Значение".
-	// Это лучший подход для графических меню с пропорциональными шрифтами, где
-	// выравнивание пробелами или табуляцией не работает.
+	// Определяем иконку для текущего заряда
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
-	mCurrent.SetTitle(fmt.Sprintf("Текущий заряд: %d%% %s", info.CurrentCapacity, icon))
-	mMin.SetTitle(fmt.Sprintf("Мин. порог: %d%%", minThreshold))
-	mMax.SetTitle(fmt.Sprintf("Макс. порог: %d%%", maxThreshold))
-	mCycles.SetTitle(fmt.Sprintf("Циклов заряда: %d", info.CycleCount))
-	mHealth.SetTitle(fmt.Sprintf("Здоровье батареи: %d%%", info.HealthPercent))
+
+	// Используем выравнивание с пробелами для создания двух колонок
+	// Выравнивание в столбик не идеально, но это лучшее, что можно сделать с menuet
+	currentStatusText := fmt.Sprintf("%d%% %s", info.CurrentCapacity, icon)
+
+	return []menuet.MenuItem{
+		{
+			// Заголовок пункта можно использовать как статус
+			Text:     currentStatusText,
+			FontSize: 14,
+			State:    true, // Отмечен
+		},
+		{Type: menuet.Separator}, // Разделитель
+		{
+			// Используем форматирование строк для создания колонок
+			// Первая колонка 20 символов, вторая выровнена по правому краю
+			Text:     fmt.Sprintf("%-20s %4d%%", "Текущий заряд:", info.CurrentCapacity),
+			FontSize: 13,
+		},
+		{
+			Text:     fmt.Sprintf("%-20s %4d%%", "Мин. порог:", minThreshold),
+			FontSize: 13,
+		},
+		{
+			Text:     fmt.Sprintf("%-20s %4d%%", "Макс. порог:", maxThreshold),
+			FontSize: 13,
+		},
+		{
+			Text:     fmt.Sprintf("%-20s %4d", "Циклов заряда:", info.CycleCount),
+			FontSize: 13,
+		},
+		{
+			Text:     fmt.Sprintf("%-20s %4d%%", "Здоровье батареи:", info.HealthPercent),
+			FontSize: 13,
+		},
+		{Type: menuet.Separator}, // Разделитель
+		{Text: "Выход", Clicked: exitApp},
+	}
+}
+
+// startStatusUpdater запускает периодическое обновление данных в меню
+func startStatusUpdater() {
+	// Первое обновление сразу после запуска
+	menuet.App().MenuChanged()
+
+	// Затем периодические обновления
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		menuet.App().MenuChanged()
+	}
 }
 
 // getBatteryIcon возвращает иконку батареи в зависимости от уровня заряда
@@ -75,93 +165,36 @@ func getBatteryIcon(percent int, isCharging bool) string {
 	}
 }
 
-// onReady инициализирует иконку в трее
-func onReady() {
-	iconData := getAppIconFromFile()
-	// Используем цветную иконку, а не шаблонную (template), чтобы macOS не перекрашивал её.
-	systray.SetIcon(iconData)
-	systray.SetTitle("MBT")
-	systray.SetTooltip("MacBat - Управление батареей")
+// exitApp обрабатывает клик на пункте "Выход"
+func exitApp() {
+	// Завершаем фоновый процесс
+	killBackground()
 
-	// Добавляем элементы меню
-	// mBattery := systray.AddMenuItem("Загрузка...", "")
-	// mBattery.Disable()
-
-	systray.AddSeparator()
-
-	mCurrent := systray.AddMenuItem("Текущий заряд: --%", "")
-	mCurrent.Disable()
-
-	mMin := systray.AddMenuItem("Мин. порог: --%", "")
-	mMin.Disable()
-
-	mMax := systray.AddMenuItem("Макс. порог: --%", "")
-	mMax.Disable()
-
-	mCycles := systray.AddMenuItem("Циклов заряда: --", "")
-	mCycles.Disable()
-
-	mHealth := systray.AddMenuItem("Здоровье батареи: --%", "")
-	mHealth.Disable()
-
-	systray.AddSeparator()
-
-	mQuit := systray.AddMenuItem("Выход", "Завершить работу приложения")
-
-	// Создаем логгер для получения конфигурации
-	log := logger.New(paths.LogPath(), 100, true, false)
-
-	// Создаем менеджер конфигурации
-	// Загружаем конфигурацию для отображения порогов
-	cfgManager, _ := config.New(log, paths.ConfigPath())
-	conf, _ := cfgManager.Load()
-
-	// Переносим первое обновление меню на короткую задержку,
-	// чтобы гарантировать завершение инициализации GUI и избежать блокировки.
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, conf)
-	}()
-
-	// Запускаем тикер для обновления меню каждые 30 секунд
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, conf)
-		}
-	}()
-
-	go func() {
-		<-mQuit.ClickedCh
-		// Завершаем фоновый процесс, запущенный с --background
-		killBackground()
-		systray.Quit()
-		// Допустим, systray.Run() иногда не завершает процесс мгновенно,
-		// поэтому завершаем его явно.
-		time.Sleep(100 * time.Millisecond)
-		os.Exit(0)
-	}()
+	// Завершаем работу программы
+	time.Sleep(100 * time.Millisecond)
+	os.Exit(0)
 }
 
-//go:embed sys-tray-icon.png
-var iconData []byte
-
-func getAppIconFromFile() []byte {
-	return iconData
-}
-
+// killBackground завершает фоновый процесс мониторинга батареи
 func killBackground() {
-
 	pidPath := paths.PIDPath()
 	data, err := os.ReadFile(pidPath)
 	if err != nil {
-		return
-	} // файла нет – процесса нет
+		return // файла нет – процесса нет
+	}
+
 	pid, _ := strconv.Atoi(string(data))
 	p, err := os.FindProcess(pid)
 	if err == nil {
 		_ = p.Signal(syscall.SIGTERM) // корректное завершение
 	}
 	_ = os.Remove(pidPath)
+}
+
+//go:embed sys-tray-icon.png
+var iconData []byte
+
+// getAppIconFromFile возвращает данные иконки для отображения в трее
+func getAppIconFromFile() []byte {
+	return iconData
 }
