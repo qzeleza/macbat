@@ -32,7 +32,7 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth *systray.MenuItem, conf *
 
 	// Обновляем заголовок с иконкой батареи
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
-	mCurrent.SetTitle(fmt.Sprintf("%-18s %4d%% %s", "Текущий заряд:", info.CurrentCapacity, icon))
+	mCurrent.SetTitle(fmt.Sprintf("%-21s %4d%% %s", "Текущий заряд:", info.CurrentCapacity, icon))
 
 	// Получаем пороги из конфигурации
 	minThreshold := 20 // Значение по умолчанию
@@ -46,10 +46,10 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth *systray.MenuItem, conf *
 	// Используем форматирование для выравнивания значений по правому краю.
 	// Самая длинная метка - "Здоровье батареи:" (17 символов).
 	// Мы делаем левую часть (метку) шириной 18 символов, а правую (значение) - 4 символа.
-	mMin.SetTitle(fmt.Sprintf("%-18s %4d%%", "Мин. порог:", minThreshold))
-	mMax.SetTitle(fmt.Sprintf("%-18s %4d%%", "Макс. порог:", maxThreshold))
-	mCycles.SetTitle(fmt.Sprintf("%-18s %4d", "Циклов заряда:", info.CycleCount))
-	mHealth.SetTitle(fmt.Sprintf("%-18s %4d%%", "Здоровье батареи:", info.HealthPercent))
+	mMin.SetTitle(fmt.Sprintf("%-21s %4d%%", "Мин. порог:", minThreshold))
+	mMax.SetTitle(fmt.Sprintf("%-21s %4d%%", "Макс. порог:", maxThreshold))
+	mCycles.SetTitle(fmt.Sprintf("%-21s %4d", "Циклов заряда:", info.CycleCount))
+	mHealth.SetTitle(fmt.Sprintf("%-21s %4d%%", "Здоровье батареи:", info.HealthPercent))
 }
 
 // getBatteryIcon возвращает иконку батареи в зависимости от уровня заряда

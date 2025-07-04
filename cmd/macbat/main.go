@@ -4,13 +4,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/getlantern/systray"
-	"golang.org/x/term" // Для определения, запущены ли мы из терминала
+	"golang.org/x/term"
 
 	"macbat/internal/config"
 	"macbat/internal/logger"
@@ -19,6 +20,47 @@ import (
 
 var log *logger.Logger
 
+// launchDetached запускает копию приложения с указанным флагом в отсоединенном режиме.
+func launchDetached(flag string) {
+	log.Info(fmt.Sprintf("Запуск отсоединенного процесса с флагом: %s", flag))
+
+	cmd := exec.Command(paths.BinaryPath(), flag)
+	cmd.Env = os.Environ()
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		log.Fatal(fmt.Sprintf("Не удалось запустить процесс с флагом %s: %v", flag, err))
+	}
+	log.Info(fmt.Sprintf("Процесс с флагом %s успешно запущен с PID: %d", flag, cmd.Process.Pid))
+}
+
+// isGUIRunning проверяет, запущен ли GUI процесс, по lock-файлу.
+func isGUIRunning() bool {
+	lockFile := paths.GUILockPath()
+	pidBytes, err := os.ReadFile(lockFile)
+	if err != nil {
+		return false // Файл не найден, GUI не запущен.
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil {
+		_ = os.Remove(lockFile) // Поврежденный файл, удаляем.
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		_ = os.Remove(lockFile) // Процесс не найден, устаревший файл.
+		return false
+	}
+	// Сигнал 0 проверяет существование процесса.
+	if err = process.Signal(syscall.Signal(0)); err == nil {
+		return true // Процесс существует.
+	}
+	_ = os.Remove(lockFile) // Процесс не существует, устаревший файл.
+	return false
+}
+
 func main() {
 	// Инициализация логгера
 	log = logger.New(paths.LogPath(), 100, true, false)
@@ -26,7 +68,7 @@ func main() {
 	// --- Инициализация конфигурации ---
 	cfgManager, err := config.New(log, paths.ConfigPath())
 	if err != nil {
-		log.Fatal(fmt.Sprintf("Ошибка загрузки конфигурации: %v", err))
+		log.Fatal(fmt.Sprintf("Ошибка инициализации менеджера конфигурации: %v", err))
 	}
 	conf, err := cfgManager.Load()
 	if err != nil {
@@ -36,7 +78,8 @@ func main() {
 	// --- Обработка флагов командной строки ---
 	installFlag := flag.Bool("install", false, "Установить приложение и агент launchd")
 	uninstallFlag := flag.Bool("uninstall", false, "Удалить приложение и агент launchd")
-	backgroundFlag := flag.Bool("background", false, "Запуск в фоновом режиме")
+	backgroundFlag := flag.Bool("background", false, "Запуск фонового процесса мониторинга")
+	guiAgentFlag := flag.Bool("gui-agent", false, "Внутренний флаг для запуска GUI агента")
 	flag.Parse()
 
 	// --- Логика установки/удаления ---
@@ -48,7 +91,6 @@ func main() {
 		log.Info("Установка успешно завершена.")
 		return
 	}
-
 	if *uninstallFlag {
 		log.Info("Запрошено удаление приложения...")
 		if err := Uninstall(log); err != nil {
@@ -58,14 +100,14 @@ func main() {
 		return
 	}
 
-	// --- Логика фонового режима ---
+	// --- Логика фонового процесса ---
 	if *backgroundFlag {
 		if isBackgroundRunning() {
 			log.Info("Фоновый процесс уже запущен. Выход.")
 			return
 		}
 		if term.IsTerminal(int(os.Stdout.Fd())) {
-			launchInBackground()
+			launchDetached("--background")
 			log.Info("Перезапуск в фоновом режиме для отсоединения от терминала.")
 			return
 		}
@@ -78,27 +120,36 @@ func main() {
 		return
 	}
 
-	// --- Логика для GUI (иконка в трее) ---
-	// Проверяем, не запущен ли уже GUI
-	lockFile := paths.GUILockPath()
-	if _, err := os.Stat(lockFile); err == nil {
-		log.Info("Экземпляр GUI уже запущен. Выход.")
+	// --- Логика GUI Агента ---
+	if *guiAgentFlag {
+		log.Info("Запуск агента GUI (иконка в трее)...")
+		// Создаем lock-файл, так как этот процесс теперь главный для GUI.
+		_ = os.WriteFile(paths.GUILockPath(), []byte(strconv.Itoa(os.Getpid())), 0644)
+
+		// Запускаем фоновый процесс, если он еще не запущен
+		if !isBackgroundRunning() {
+			log.Info("Запуск фонового процесса мониторинга батареи...")
+			launchDetached("--background")
+		} else {
+			log.Info("Фоновый процесс уже запущен.")
+		}
+		// Запускаем блокирующий цикл GUI
+		systray.Run(onReady, onExit)
 		return
 	}
 
-	// Создаем lock-файл
-	_ = os.WriteFile(lockFile, []byte(strconv.Itoa(os.Getpid())), 0644)
-
-	// Запускаем фоновый процесс, если он еще не запущен
-	if !isBackgroundRunning() {
-		log.Info("Запуск фонового процесса мониторинга батареи...")
-		launchInBackground()
-	} else {
-		log.Info("Фоновый процесс уже запущен.")
+	// --- Логика Лаунчера (запуск без флагов) ---
+	log.Info("Запуск приложения (режим лаунчера)...")
+	if isGUIRunning() {
+		log.Info("Приложение уже запущено. Выход.")
+		return
 	}
 
-	systray.Run(onReady, onExit)
+	log.Info("Запуск GUI агента...")
+	launchDetached("--gui-agent")
+	log.Info("Приложение успешно запущено в фоновом режиме. Лаунчер завершает работу.")
 }
+
 
 func onExit() {
 	// Здесь можно выполнить очистку перед выходом
