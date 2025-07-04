@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,7 +40,7 @@ func main() {
 	flag.Parse()
 
 	// --- Логика установки/удаления ---
-		if *installFlag {
+	if *installFlag {
 		log.Info("Запрошена установка приложения...")
 		if err := Install(log, conf); err != nil {
 			log.Fatal(fmt.Sprintf("Ошибка во время установки: %v", err))
@@ -61,75 +60,81 @@ func main() {
 
 	// --- Логика фонового режима ---
 	if *backgroundFlag {
-		// Если мы запускаемся из терминала, нужно отсоединиться, чтобы не блокировать его.
-		// Это делает запуск `./macbat --background` более удобным для пользователя.
+		if isBackgroundRunning() {
+			log.Info("Фоновый процесс уже запущен. Выход.")
+			return
+		}
 		if term.IsTerminal(int(os.Stdout.Fd())) {
-			// Запускаем себя же в фоне и выходим
 			launchInBackground()
 			log.Info("Перезапуск в фоновом режиме для отсоединения от терминала.")
 			return
 		}
-
-		// Записываем PID фонового процесса для корректного завершения из GUI
 		if err := writePID(); err != nil {
 			log.Error(fmt.Sprintf("Не удалось записать PID файла: %v", err))
 		}
-
 		log.Info("Запуск в фоновом режиме...")
 		runBackgroundMainTask(conf, cfgManager, "run")
-
-		// Удаляем PID-файл перед выходом, так как процесс завершается
 		_ = os.Remove(paths.PIDPath())
 		return
 	}
 
 	// --- Логика для GUI (иконка в трее) ---
-	log.Info("Запуск иконки в трее...")
+	// Проверяем, не запущен ли уже GUI
+	lockFile := paths.GUILockPath()
+	if _, err := os.Stat(lockFile); err == nil {
+		log.Info("Экземпляр GUI уже запущен. Выход.")
+		return
+	}
 
-	// Запускаем всю логику управления фоновым процессом в отдельной горутине,
-	// чтобы не блокировать запуск GUI.
-	go func() {
-		// Перед запуском нового фонового процесса принудительно завершаем старый,
-		// если он остался от предыдущего сбоя. Это гарантирует, что мы не создадим зомби.
-		killBackgroundGo()
+	// Создаем lock-файл
+	_ = os.WriteFile(lockFile, []byte(strconv.Itoa(os.Getpid())), 0644)
 
-		// Запускаем фоновый процесс, если он еще не запущен
-		if !isProcessRunning("macbat --background") {
-			log.Info("Запуск фонового процесса мониторинга батареи...")
-			launchInBackground()
-		} else {
-			log.Info("Фоновый процесс уже запущен.")
-		}
-	}()
+	// Запускаем фоновый процесс, если он еще не запущен
+	if !isBackgroundRunning() {
+		log.Info("Запуск фонового процесса мониторинга батареи...")
+		launchInBackground()
+	} else {
+		log.Info("Фоновый процесс уже запущен.")
+	}
 
-	// Просто запускаем GUI. systray.Run() - блокирующая операция,
-	// она будет держать процесс активным.
-	// Убрана сложная и подверженная ошибкам логика daemonizeGUI.
 	systray.Run(onReady, onExit)
 }
 
 func onExit() {
 	// Здесь можно выполнить очистку перед выходом
 	log.Info("Выход из приложения")
-	// Удаляем PID-файл перед выходом
-	_ = os.Remove(paths.PIDPath())
+	// Удаляем lock-файл GUI перед выходом
+	_ = os.Remove(paths.GUILockPath())
 	os.Exit(0)
 }
 
-// isProcessRunning проверяет, запущен ли уже процесс с указанным именем.
-// Использует `pgrep` для поиска процесса.
-func isProcessRunning(pattern string) bool {
-	// Команда ищет процесс по имени, исключая сам процесс pgrep, чтобы избежать ложных срабатываний.
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("pgrep -f '%s' | grep -v pgrep", pattern))
-	output, err := cmd.Output()
-
+// isBackgroundRunning проверяет, запущен ли фоновый процесс, по PID-файлу.
+func isBackgroundRunning() bool {
+	pidPath := paths.PIDPath()
+	pidBytes, err := os.ReadFile(pidPath)
 	if err != nil {
-		// Если err != nil, значит pgrep ничего не нашел, что является ожидаемым поведением.
+		// Если файл не читается, считаем, что процесс не запущен.
 		return false
 	}
 
-	// Если вывод не пустой, значит процесс найден.
-	return len(output) > 0
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil {
+		// Некорректный PID в файле.
+		return false
+	}
+
+	// Проверяем, существует ли процесс с таким PID.
+	// Отправка сигнала 0 - это стандартный способ проверить существование процесса в Unix-системах.
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		// Процесс не найден.
+		return false
+	}
+
+	// Если err == nil, сигнал был успешно отправлен (или у нас нет прав, но процесс существует).
+	// Если err == os.ErrProcessDone, процесс уже завершился.
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
 }
 
 // writePID записывает PID текущего процесса в файл.

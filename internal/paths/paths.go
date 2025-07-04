@@ -87,3 +87,9 @@ func AgentIdentifier() string {
 func PIDPath() string {
 	return "/tmp/" + AppName + ".pid"
 }
+
+// GUILockPath возвращает путь к файлу блокировки GUI.
+// @return string - путь к macbat.gui.lock
+func GUILockPath() string {
+	return "/tmp/" + AppName + ".gui.lock"
+}
