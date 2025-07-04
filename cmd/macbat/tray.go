@@ -8,7 +8,6 @@ import (
 	"macbat/internal/config"
 	"macbat/internal/logger"
 	"macbat/internal/paths"
-	"macbat/internal/utils"
 	"os"
 	"strconv"
 	"sync"
@@ -39,24 +38,15 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth *systray.MenuItem, conf *
 		maxThreshold = conf.MaxThreshold
 	}
 
-	// Задаем общую ширину для меню, чтобы выравнивание было консистентным.
-	// Подбирается экспериментально для хорошего вида.
-	const totalWidth = 35
-
-	// Формируем значения для отображения
+	// Обновляем пункты меню, используя простой и надежный формат "Метка: Значение".
+	// Это лучший подход для графических меню с пропорциональными шрифтами, где
+	// выравнивание пробелами или табуляцией не работает.
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
-	currentValue := fmt.Sprintf("%d%% %s", info.CurrentCapacity, icon)
-	minValue := fmt.Sprintf("%d%%", minThreshold)
-	maxValue := fmt.Sprintf("%d%%", maxThreshold)
-	cyclesValue := fmt.Sprintf("%d", info.CycleCount)
-	healthValue := fmt.Sprintf("%d%%", info.HealthPercent)
-
-	// Обновляем пункты меню с правильным форматированием
-	mCurrent.SetTitle(utils.FormatMenuLine("Текущий заряд:", currentValue, totalWidth))
-	mMin.SetTitle(utils.FormatMenuLine("Мин. порог:", minValue, totalWidth))
-	mMax.SetTitle(utils.FormatMenuLine("Макс. порог:", maxValue, totalWidth))
-	mCycles.SetTitle(utils.FormatMenuLine("Циклов заряда:", cyclesValue, totalWidth))
-	mHealth.SetTitle(utils.FormatMenuLine("Здоровье батареи:", healthValue, totalWidth))
+	mCurrent.SetTitle(fmt.Sprintf("Текущий заряд: %d%% %s", info.CurrentCapacity, icon))
+	mMin.SetTitle(fmt.Sprintf("Мин. порог: %d%%", minThreshold))
+	mMax.SetTitle(fmt.Sprintf("Макс. порог: %d%%", maxThreshold))
+	mCycles.SetTitle(fmt.Sprintf("Циклов заряда: %d", info.CycleCount))
+	mHealth.SetTitle(fmt.Sprintf("Здоровье батареи: %d%%", info.HealthPercent))
 }
 
 // getBatteryIcon возвращает иконку батареи в зависимости от уровня заряда
