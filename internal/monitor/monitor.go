@@ -133,7 +133,8 @@ func (m *Monitor) Start(mode string) {
 
 	// Определяем источник данных о батарее (реальный или симулятор).
 	var provider batteryInfoProvider
-	if mode == "test" || m.config.UseSimulator {
+	if mode == "test" {
+		m.config.DebugEnabled = true // Включаем режим отладки
 		m.notifier.Test("Режим работы: СИМУЛЯТОР.")
 		simulator := simulator.NewBatterySimulator(
 			m.notifier,                // Объект для отправки уведомлений

@@ -61,14 +61,21 @@ func (l *Logger) EnableLogging(enabled bool) {
 // Info записывает информационное сообщение в лог.
 func (l *Logger) Test(message string) {
 	if l.isLogEnabled {
-		l.logMessage("TEST", message)
+		l.logMessage("TEST ", message)
 	}
 }
 
 // Info записывает информационное сообщение в лог.
 func (l *Logger) Info(message string) {
 	if l.isLogEnabled {
-		l.logMessage("INFO", message)
+		l.logMessage("INFO ", message)
+	}
+}
+
+// Line записывает линию в лог.
+func (l *Logger) Line() {
+	if l.isLogEnabled {
+		l.logMessage("-----", strings.Repeat("-", 80))
 	}
 }
 

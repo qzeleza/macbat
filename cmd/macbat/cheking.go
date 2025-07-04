@@ -12,6 +12,12 @@ import (
 
 func isAppInstalled(log *logger.Logger) bool {
 
+	// Удаляем файлы предыдущей версии
+	if err := removeOldFiles(log); err != nil {
+		log.Error(fmt.Sprintf("Не удалось удалить файлы предыдущей версии: %v", err))
+		return false
+	}
+
 	log.Info("Запуск проверки наличия установленных файлов...")
 
 	// Определяем задачи для проверки в виде карты.
@@ -20,23 +26,22 @@ func isAppInstalled(log *logger.Logger) bool {
 	searchTasks := map[string][]string{
 		paths.BinaryPath(): {},
 		paths.PlistPath(): {
-			"<key>ProgramArguments</key>",
-			fmt.Sprintf("<string>%s</string>", paths.AgentIdentifier()),
-			"<key>RunAtLoad</key>\n<true/>",
-			"<key>KeepAlive</key>\n<true/>",
+			"ProgramArguments",
+			paths.AgentIdentifier(),
+			"RunAtLoad",
+			"KeepAlive",
 		},
 		paths.ConfigPath(): {
-			"MinThreshold", // Ищем ошибки в системном логе
-			"MaxThreshold",
-			"NotificationInterval",
-			"MaxNotifications",
-			"LogFilePath",
-			"LogRotationLines",
-			"CheckIntervalWhenCharging",
-			"CheckIntervalWhenDischarging",
-			"UseSimulator",
-			"LogEnabled",
-			"DebugEnabled",
+			"min_threshold", // Ищем ошибки в системном логе
+			"max_threshold",
+			"notification_interval",
+			"max_notifications",
+			"log_file_path",
+			"log_rotation_lines",
+			"check_interval_charging",
+			"check_interval_discharging",
+			"log_enabled",
+			"debug_enabled",
 		},
 	}
 
@@ -186,13 +191,15 @@ func allStringsExistInFile(filePath string, requiredStrings []string, log *logge
 // - Возвращает false в случае ошибки выполнения команды
 // - Проверяет только активные процессы, не статус загрузки
 func IsAgentRunning(log *logger.Logger) bool {
-	cmd := exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/"+paths.AgentIdentifier(), os.Getuid()))
+	log.Debug("Проверка статуса агента...")
+	agentID := paths.AgentIdentifier()
+	cmd := exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/"+agentID, os.Getuid()))
 	output, err := cmd.Output()
-	if err != nil {
-		log.Error(fmt.Sprintf("Ошибка при проверке статуса агента: %v", err))
+	if err != nil && !strings.Contains(err.Error(), "Could not find service") {
+		log.Error(fmt.Sprintf("Ошибка при проверке статуса агента: %v", err.Error()))
 		return false
 	}
-	isRunning := strings.Contains(string(output), paths.AgentIdentifier())
+	isRunning := strings.Contains(string(output), agentID)
 	log.Debug(fmt.Sprintf("Агент %s", map[bool]string{true: "запущен", false: "не запущен"}[isRunning]))
 	return isRunning
 }

@@ -36,7 +36,6 @@ type Config struct {
 	DebugEnabled                 bool   `json:"debug_enabled"`
 	LogFilePath                  string `json:"log_file_path"`
 	LogRotationLines             int    `json:"log_rotation_lines"`
-	UseSimulator                 bool   `json:"use_simulator"`
 	LogEnabled                   bool   `json:"log_enabled"`
 }
 
@@ -84,7 +83,6 @@ func Default() *Config {
 		LogRotationLines:             1000,
 		CheckIntervalWhenCharging:    30,   // ИЗМЕНЕНИЕ: 30 секунд
 		CheckIntervalWhenDischarging: 1800, // ИЗМЕНЕНИЕ: 30 минут = 1800 секунд
-		UseSimulator:                 false,
 		LogEnabled:                   true,
 		DebugEnabled:                 false,
 	}
@@ -230,11 +228,6 @@ func (m *Manager) mergeWithDefaults(loaded *Config, presenceMap map[string]inter
 	if !keyExists("log_rotation_lines") {
 		m.log.Debug(fmt.Sprintf("Поле 'log_rotation_lines' отсутствует. Установлено значение по умолчанию: %d", defaultCfg.LogRotationLines))
 		loaded.LogRotationLines = defaultCfg.LogRotationLines
-		changesMade = true
-	}
-	if !keyExists("use_simulator") {
-		m.log.Debug(fmt.Sprintf("Поле 'use_simulator' отсутствует. Установлено значение по умолчанию: %t", defaultCfg.UseSimulator))
-		loaded.UseSimulator = defaultCfg.UseSimulator
 		changesMade = true
 	}
 	if !keyExists("log_enabled") {

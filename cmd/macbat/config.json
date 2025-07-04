@@ -8,6 +8,5 @@
   "debug_enabled": false,
   "log_file_path": "/Users/samovar/Library/Logs/macbat/macbat.log",
   "log_rotation_lines": 1000,
-  "use_simulator": false,
   "log_enabled": true
 }

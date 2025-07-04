@@ -25,11 +25,6 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 		return err
 	}
 
-	// Удаляем файлы предыдущей версии
-	if err := removeOldFiles(log, binPath); err != nil {
-		return err
-	}
-
 	// Создаем директорию для логов
 	if err := createLogDirectory(log); err != nil {
 		return err
@@ -79,9 +74,11 @@ func getBinaryPaths(log *logger.Logger) (string, string, string, error) {
 	return binPath, binDir, currentBin, nil
 }
 
-func removeOldFiles(log *logger.Logger, binPath string) error {
+func removeOldFiles(log *logger.Logger) error {
 	filesToRemove := []string{
 		paths.PlistPath(),
+		paths.LogPath(),
+		paths.ErrorLogPath(),
 	}
 
 	for _, path := range filesToRemove {
@@ -223,6 +220,8 @@ func createPlistFile(binPath string, log *logger.Logger, cfg *config.Config) err
 		mess := fmt.Sprintf("не удалось записать plist: %v", err)
 		log.Error(mess)
 		return fmt.Errorf("%s", mess)
+	} else {
+		log.Debug(fmt.Sprintf("Plist успешно записан: %s", plistPath))
 	}
 	return nil
 }
