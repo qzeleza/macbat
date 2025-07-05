@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"fmt"
@@ -14,6 +14,7 @@ import (
 // @param log *logger.Logger - логгер для вывода отладочной информации.
 // @return error - ошибка, если директория недоступна для записи.
 // Возвращает nil, если права на запись имеются.
+// CheckWriteAccess проверяет права на запись в указанную директорию.
 func CheckWriteAccess(dir string, log *logger.Logger) error {
 	log.Debug(fmt.Sprintf("Проверка прав на запись в директорию: %s", dir))
 

@@ -2,7 +2,7 @@
   "min_threshold": 21,
   "max_threshold": 81,
   "check_interval_charging": 60,
-  "check_interval_discharging": 1634,
+  "check_interval_discharging": 1326,
   "notification_interval": 1800,
   "max_notifications": 3,
   "debug_enabled": true,

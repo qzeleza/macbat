@@ -3,17 +3,18 @@ package main
 import (
 	"flag"
 	"fmt"
+	"macbat/internal/background"
+	"macbat/internal/config"
+	"macbat/internal/logger"
+	"macbat/internal/monitor"
+	"macbat/internal/paths"
+	"macbat/internal/tray"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
-	"github.com/getlantern/systray"
 	"golang.org/x/term"
-
-	"macbat/internal/config"
-	"macbat/internal/logger"
-	"macbat/internal/paths"
 )
 
 var log *logger.Logger
@@ -79,7 +80,7 @@ func main() {
 	}
 
 	// --- Логика установки/удаления ---
-	if *installFlag || !isAppInstalled(log) {
+	if *installFlag || !monitor.IsAppInstalled(log) {
 		log.Line()
 		log.Info("Установка приложения...")
 		if err := Install(log, conf); err != nil {
@@ -104,11 +105,11 @@ func main() {
 	// --- Логика тестового режима ---
 	if *testFlag {
 		log.Line()
-		killBackground() // Завершаем фоновый процесс
+		background.Kill() // Завершаем фоновый процесс
 		// Запускаем основную задачу мониторинга в тестовом режиме
 		log.Info("Запуск мониторинга батареи в тестовом режиме...")
 		modeRun = "test"
-		runBackgroundMainTask(conf, cfgManager, modeRun)
+		background.Run(conf, cfgManager, modeRun)
 		return
 	}
 
@@ -116,7 +117,7 @@ func main() {
 	if *backgroundFlag {
 
 		// Если фоновый процесс уже запущен, то выходим
-		if isBackgroundRunning() {
+		if background.IsRunning() {
 			log.Info("Фоновый процесс уже запущен. Выход.")
 			return
 		}
@@ -124,22 +125,21 @@ func main() {
 
 		// Если запущен в терминале, перезапускаем в фоновом режиме и выходим
 		if term.IsTerminal(int(os.Stdout.Fd())) {
-			launchDetached("--background")
+			background.LaunchDetached("--background")
 			log.Info("Перезапуск в фоновом режиме для отсоединения от терминала.")
 			return
 		}
 
 		// Если мы здесь, значит процесс уже отсоединен от терминала
 		// Записываем PID файл
-		if err := writePID(); err != nil {
+		if err := background.WritePID(); err != nil {
 			log.Error(fmt.Sprintf("Не удалось записать PID файла: %v", err))
 		}
 		log.Line()
 
 		// Запускаем основную задачу мониторинга в обычном режиме
 		log.Info("Запуск мониторинга батареи в обычном режиме...")
-		// killBackgroundGo()                               // Завершаем фоновый процесс
-		runBackgroundMainTask(conf, cfgManager, modeRun) // Запускаем основную задачу мониторинга
+		background.Run(conf, cfgManager, modeRun) // Запускаем основную задачу мониторинга
 
 		// После завершения задачи удаляем PID файл
 		defer func() {
@@ -154,38 +154,34 @@ func main() {
 		log.Info("Запуск агента GUI (иконка в трее)...")
 		// Создаем lock-файл, так как этот процесс теперь главный для GUI.
 		_ = os.WriteFile(paths.GUILockPath(), []byte(strconv.Itoa(os.Getpid())), 0644)
+		// Удаляем lock-файл при выходе
+		defer func() {
+			_ = os.Remove(paths.GUILockPath())
+		}()
 
 		// Запускаем фоновый процесс, если он еще не запущен
-		if !isBackgroundRunning() {
+		if !background.IsRunning() {
 			log.Info("Запуск фонового процесса мониторинга батареи...")
-			launchDetached("--background")
+			background.LaunchDetached("--background")
 		} else {
 			log.Info("Фоновый процесс уже запущен.")
 		}
 		log.Line()
 		// Запускаем блокирующий цикл GUI
-		systray.Run(onReady, onExit)
+		tray.Start(log, modeRun)
 		return
 	}
 
 	// --- Логика Лаунчера (запуск без флагов) ---
 	log.Line()
 	log.Info("Запуск приложения (режим лаунчера)...")
-	if isGUIRunning() {
+	if background.IsGUIRunning() {
 		log.Info("Приложение уже запущено. Выход.")
 		return
 	}
 
 	log.Info("Запуск GUI агента...")
-	launchDetached("--gui-agent")
+	background.LaunchDetached("--gui-agent")
 	log.Info("Приложение успешно запущено в фоновом режиме. Лаунчер завершает работу.")
 	log.Line()
-}
-
-func onExit() {
-	// Здесь можно выполнить очистку перед выходом
-	log.Info("Выход из приложения")
-	// Удаляем lock-файл GUI перед выходом
-	_ = os.Remove(paths.GUILockPath())
-	os.Exit(0)
 }

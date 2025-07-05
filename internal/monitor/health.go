@@ -1,4 +1,4 @@
-package main
+package monitor
 
 import (
 	"bufio"
@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-func isAppInstalled(log *logger.Logger) bool {
+// IsAppInstalled проверяет, корректно ли установлено приложение, включая все его компоненты.
+func IsAppInstalled(log *logger.Logger) bool {
 
 	// Удаляем файлы предыдущей версии
 	if err := removeOldFiles(log); err != nil {
@@ -62,7 +63,7 @@ func isAppInstalled(log *logger.Logger) bool {
 
 	if ok {
 		// Проверяем запущен ли агент
-		if IsAgentRunning(log) {
+		if isAgentRunning(log) {
 			log.Debug("Агент запущен...")
 		} else {
 			log.Debug("Агент не запущен. Запуск...")
@@ -170,7 +171,7 @@ func allStringsExistInFile(filePath string, requiredStrings []string, log *logge
 	return foundCount == len(requiredStrings), nil
 }
 
-// IsAgentRunning проверяет, запущен ли агент в системе.
+// isAgentRunning проверяет, запущен ли агент в системе.
 //
 // Функция использует команду launchctl для проверки состояния агента
 // в контексте текущего пользователя.
@@ -190,16 +191,95 @@ func allStringsExistInFile(filePath string, requiredStrings []string, log *logge
 // - Не требует прав администратора
 // - Возвращает false в случае ошибки выполнения команды
 // - Проверяет только активные процессы, не статус загрузки
-func IsAgentRunning(log *logger.Logger) bool {
+func isAgentRunning(log *logger.Logger) bool {
 	log.Debug("Проверка статуса агента...")
 	agentID := paths.AgentIdentifier()
 	cmd := exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/"+agentID, os.Getuid()))
-	output, err := cmd.Output()
-	if err != nil && !strings.Contains(err.Error(), "Could not find service") {
-		log.Error(fmt.Sprintf("Ошибка при проверке статуса агента: %v", err.Error()))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Debug(fmt.Sprintf("Агент не запущен или произошла ошибка: %v", err))
 		return false
 	}
-	isRunning := strings.Contains(string(output), agentID)
-	log.Debug(fmt.Sprintf("Агент %s", map[bool]string{true: "запущен", false: "не запущен"}[isRunning]))
-	return isRunning
+
+	log.Debug(fmt.Sprintf("Вывод launchctl: %s", string(output)))
+
+	// Проверяем, что PID существует и процесс не является \"Could not find service\"
+	return strings.Contains(string(output), agentID) && !strings.Contains(string(output), "Could not find service")
+}
+
+// removeOldFiles удаляет старые файлы конфигурации и логов.
+func removeOldFiles(log *logger.Logger) error {
+	filesToRemove := []string{
+		paths.PlistPath(),
+		paths.LogPath(),
+		paths.ErrorLogPath(),
+	}
+
+	for _, path := range filesToRemove {
+		log.Debug(fmt.Sprintf("Удаление файла: %s", path))
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			log.Error(fmt.Sprintf("Не удалось удалить %s: %v", path, err))
+			// Продолжаем удаление других файлов
+		} else if err == nil {
+			log.Debug(fmt.Sprintf("Файл успешно удален: %s", path))
+		}
+	}
+	return nil
+}
+
+// loadAgent является вспомогательной функцией для загрузки агента.
+func loadAgent(log *logger.Logger) error {
+	if state, err := LoadAgent(log); err != nil {
+		if !state {
+			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
+			log.Error(mess)
+			return fmt.Errorf("%s", mess)
+		}
+	}
+	return nil
+}
+
+// LoadAgent загружает и активирует агент в системе launchd.
+//
+// Функция регистрирует агента в launchd, что позволяет ему автоматически
+// запускаться при загрузке системы и перезапускаться при сбоях.
+//
+// @return bool Флаг успешного выполнения операции
+// @return error Ошибка, если не удалось загрузить агента
+func LoadAgent(log *logger.Logger) (bool, error) {
+
+	if !isAgentRunning(log) {
+		cmd := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
+		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
+			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
+			log.Error(mess)
+			return false, fmt.Errorf("%s", mess)
+		}
+		return true, nil
+	}
+	mess := "Агент уже загружен посредством launchctl"
+	log.Debug(mess)
+	return true, fmt.Errorf("%s", mess)
+}
+
+// UnloadAgent останавливает и выгружает агент из системы launchd.
+//
+// Функция останавливает выполнение агента и удаляет его из списка
+// автоматически запускаемых при загрузке системы.
+//
+// @return bool Флаг успешного выполнения операции
+// @return error Ошибка, если не удалось выгрузить агента
+func UnloadAgent(log *logger.Logger) (bool, error) {
+	if isAgentRunning(log) {
+		cmd := exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
+		if err := cmd.Run(); err != nil && !strings.Contains(err.Error(), "Boot-out failed: 5: Input/output error") {
+			mess := fmt.Sprintf("не удалось выгрузить агент: %v", err)
+			log.Error(mess)
+			return false, fmt.Errorf("%s", mess)
+		}
+		return true, nil
+	}
+	mess := "Агент уже выгружен посредством launchctl"
+	log.Debug(mess)
+	return true, fmt.Errorf("%s", mess)
 }

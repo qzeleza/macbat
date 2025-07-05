@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 	"macbat/internal/config"
+	"macbat/internal/env"
 	"macbat/internal/logger"
+	"macbat/internal/monitor"
 	"macbat/internal/paths"
+	"macbat/internal/utils"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 // Install устанавливает приложение и регистрирует его как агент launchd.
@@ -19,11 +20,18 @@ import (
 func Install(log *logger.Logger, cfg *config.Config) error {
 	log.Info("Начало установки приложения")
 
-	// Получаем путь к бинарнику
-	binPath, binDir, _, err := getBinaryPaths(log)
+	// 1. Определяем пути
+	binPath := paths.BinaryPath()
+	binDir := paths.InstallDir()
+	currentBin, err := os.Executable()
 	if err != nil {
-		return err
+		mess := fmt.Sprintf("не удалось определить путь к текущему исполняемому файлу: %v", err)
+		log.Error(mess)
+		return fmt.Errorf(mess)
 	}
+
+	log.Debug(fmt.Sprintf("Целевой путь бинарника: %s", binPath))
+	log.Debug(fmt.Sprintf("Текущий путь бинарника: %s", currentBin))
 
 	// Создаем директорию для логов
 	if err := createLogDirectory(log); err != nil {
@@ -31,21 +39,21 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 	}
 
 	// Создаем директорию для бинарника
-	// if err := createBinaryDirectory(binDir, log); err != nil {
-	// 	return err
-	// }
+	if err := createBinaryDirectory(binDir, log); err != nil {
+		return err
+	}
 
 	// Проверяем права на запись
-	// if err := CheckWriteAccess(binDir, log); err != nil {
-	// 	mess := fmt.Sprintf("нет прав на запись в %s: %v", binDir, err)
-	// 	log.Error(mess)
-	// 	return fmt.Errorf("%s", mess)
-	// }
+	if err := utils.CheckWriteAccess(binDir, log); err != nil {
+		mess := fmt.Sprintf("нет прав на запись в %s: %v", binDir, err)
+		log.Error(mess)
+		return fmt.Errorf("%s", mess)
+	}
 
 	// Копируем бинарник
-	// if err := copyBinary(currentBin, binPath, log); err != nil {
-	// 	return err
-	// }
+	if err := copyBinary(currentBin, binPath, log); err != nil {
+		return err
+	}
 
 	// Добавляем директорию в PATH
 	addPathToEnvironment(binDir, log)
@@ -56,42 +64,13 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 	}
 
 	// Загружаем агента при помощи launchd
-	if err := loadAgent(log); err != nil {
-		return err
+	if ok, err := monitor.LoadAgent(log); !ok {
+		return fmt.Errorf("не удалось загрузить агент: %w", err)
 	}
 	return nil
 }
 
-func getBinaryPaths(log *logger.Logger) (string, string, string, error) {
-	binPath := paths.BinaryPath()
-	binDir := filepath.Dir(binPath)
-	currentBin, err := os.Executable()
-	if err != nil {
-		mess := fmt.Sprintf("не удалось определить путь к бинарнику: %v", err)
-		log.Error(mess)
-		return "", "", "", fmt.Errorf("%s", mess)
-	}
-	return binPath, binDir, currentBin, nil
-}
 
-func removeOldFiles(log *logger.Logger) error {
-	filesToRemove := []string{
-		paths.PlistPath(),
-		paths.LogPath(),
-		paths.ErrorLogPath(),
-	}
-
-	for _, path := range filesToRemove {
-		log.Debug(fmt.Sprintf("Удаление файла: %s", path))
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			log.Error(fmt.Sprintf("Не удалось удалить %s: %v", path, err))
-			// Продолжаем удаление других файлов
-		} else if err == nil {
-			log.Debug(fmt.Sprintf("Файл успешно удален: %s", path))
-		}
-	}
-	return nil
-}
 
 func createLogDirectory(log *logger.Logger) error {
 	logDir := filepath.Dir(paths.LogPath())
@@ -104,40 +83,42 @@ func createLogDirectory(log *logger.Logger) error {
 	return nil
 }
 
-// func createBinaryDirectory(binDir string, log *logger.Logger) error {
-// 	if err := os.MkdirAll(binDir, 0755); err != nil {
-// 		mess := fmt.Sprintf("не удалось создать директорию %s: %v", binDir, err)
-// 		log.Error(mess)
-// 		return fmt.Errorf("%s", mess)
-// 	}
-// 	return nil
-// }
+func createBinaryDirectory(binDir string, log *logger.Logger) error {
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		mess := fmt.Sprintf("не удалось создать директорию %s: %v", binDir, err)
+		log.Error(mess)
+		return fmt.Errorf("%s", mess)
+	}
+	return nil
+}
 
-// func copyBinary(currentBin, binPath string, log *logger.Logger) error {
-// 	log.Debug(fmt.Sprintf("Копирование бинарника из %s в %s", currentBin, binPath))
-// 	data, err := os.ReadFile(currentBin)
-// 	if err != nil {
-// 		mess := fmt.Sprintf("не удалось прочитать бинарник: %v", err)
-// 		log.Error(mess)
-// 		return fmt.Errorf("%s", mess)
-// 	}
-// 	if err := os.WriteFile(binPath, data, 0755); err != nil {
-// 		mess := fmt.Sprintf("не удалось записать бинарник в %s: %v", binPath, err)
-// 		log.Error(mess)
-// 		return fmt.Errorf("%s", mess)
-// 	}
-// 	log.Debug(fmt.Sprintf("Бинарник успешно записан: %s", binPath))
-// 	return nil
-// }
+func copyBinary(currentBin, binPath string, log *logger.Logger) error {
+	log.Debug(fmt.Sprintf("Копирование бинарника из %s в %s", currentBin, binPath))
+	data, err := os.ReadFile(currentBin)
+	if err != nil {
+		mess := fmt.Sprintf("не удалось прочитать бинарник: %v", err)
+		log.Error(mess)
+		return fmt.Errorf("%s", mess)
+	}
+	if err := os.WriteFile(binPath, data, 0755); err != nil {
+		mess := fmt.Sprintf("не удалось записать бинарник в %s: %v", binPath, err)
+		log.Error(mess)
+		return fmt.Errorf("%s", mess)
+	}
+	log.Debug(fmt.Sprintf("Бинарник успешно записан: %s", binPath))
+	return nil
+}
 
 func addPathToEnvironment(binDir string, log *logger.Logger) {
-	if err := addToPath(binDir, log); err != nil {
+	if err := env.AddToPath(binDir, log); err != nil {
 		// Не считаем это фатальной ошибкой, продолжаем установку
 		mess := fmt.Sprintf("Предупреждение: не удалось добавить директорию в PATH: %v\n", err)
 		log.Info(mess)
+		mess_2 := "Добавьте вручную: " + binDir
+		log.Info(mess_2)
 	} else {
 		// Пытаемся обновить PATH в текущей оболочке
-		if err := updateShell(log); err != nil {
+		if err := env.UpdateShell(log); err != nil {
 			mess_1 := fmt.Sprintf("Предупреждение: не удалось обновить PATH в текущей сессии: %v\n", err)
 			log.Info(mess_1)
 			mess_2 := "Выполните вручную: source ~/.zshrc (или source ~/.bash_profile)"
@@ -146,16 +127,7 @@ func addPathToEnvironment(binDir string, log *logger.Logger) {
 	}
 }
 
-func loadAgent(log *logger.Logger) error {
-	if state, err := Load(log); err != nil {
-		if !state {
-			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
-			log.Error(mess)
-			return fmt.Errorf("%s", mess)
-		}
-	}
-	return nil
-}
+
 
 // createPlistFile создает файл конфигурации для launchd в формате plist.
 //
@@ -211,7 +183,7 @@ func createPlistFile(binPath string, log *logger.Logger, cfg *config.Config) err
 		log.Error(mess)
 		return fmt.Errorf("%s", mess)
 	}
-	if err := CheckWriteAccess(filepath.Dir(plistPath), log); err != nil {
+	if err := utils.CheckWriteAccess(filepath.Dir(plistPath), log); err != nil {
 		mess := fmt.Sprintf("нет прав на запись в %s: %v", filepath.Dir(plistPath), err)
 		log.Error(mess)
 		return fmt.Errorf("%s", mess)
@@ -250,11 +222,16 @@ func createPlistFile(binPath string, log *logger.Logger, cfg *config.Config) err
 func Uninstall(log *logger.Logger) error {
 	log.Info("Начало удаления приложения")
 	// Получаем путь к директории с бинарником перед удалением
-	binDir := filepath.Dir(paths.BinaryPath())
+	binDir := paths.InstallDir()
 
 	// Выгружаем агент
-	if err := unloadAgent(log); err != nil {
-		return err
+	log.Info("Выгрузка агента...")
+	if ok, err := monitor.UnloadAgent(log); !ok {
+		mess := fmt.Sprintf("Ошибка выгрузки агента: %v", err)
+		log.Error(mess)
+		// Не возвращаем ошибку, чтобы не прерывать удаление
+	} else {
+		log.Info("Агент успешно выгружен")
 	}
 
 	// Удаляем файлы конфигурации
@@ -277,15 +254,7 @@ func Uninstall(log *logger.Logger) error {
 	return nil
 }
 
-func unloadAgent(log *logger.Logger) error {
-	log.Info("Выгрузка агента...")
-	if _, err := Unload(log); err != nil {
-		log.Error(fmt.Sprintf("Ошибка выгрузки агента: %v", err))
-		return fmt.Errorf("не удалось выгрузить агент: %v", err)
-	}
-	log.Info("Агент успешно выгружен")
-	return nil
-}
+
 
 func removePlistFile(log *logger.Logger) error {
 	plistPath := paths.PlistPath()
@@ -308,13 +277,13 @@ func removeBinary(log *logger.Logger) error {
 }
 
 func removePathFromEnvironment(binDir string, log *logger.Logger) {
-	if err := removeFromPath(binDir, log); err != nil {
+	if err := env.RemoveFromPath(binDir, log); err != nil {
 		// Не считаем это фатальной ошибкой, продолжаем удаление
 		mess := fmt.Sprintf("Предупреждение: не удалось удалить директорию из PATH: %v\n", err)
 		log.Info(mess)
 	} else {
 		// Пытаемся обновить PATH в текущей оболочке
-		if err := updateShell(log); err != nil {
+		if err := env.UpdateShell(log); err != nil {
 			mess_1 := fmt.Sprintf("Предупреждение: не удалось обновить PATH в текущей сессии: %v\n", err)
 			log.Info(mess_1)
 			mess_2 := "Выполните вручную: source ~/.zshrc (или source ~/.bash_profile)"
@@ -343,69 +312,6 @@ func removeAllFiles(log *logger.Logger) {
 	}
 }
 
-// Load загружает и активирует агент в системе launchd.
-//
-// Функция регистрирует агента в launchd, что позволяет ему автоматически
-// запускаться при загрузке системы и перезапускаться при сбоях.
-//
-// @return bool Флаг успешного выполнения операции
-// @return error Ошибка, если не удалось загрузить агента
-//
-// Пример использования:
-//
-//	if ok, err := service.Load(); !ok {
-//	    log.Fatalf("Не удалось загрузить агента: %v", err)
-//	}
-//
-// Примечания:
-// - Требует прав администратора
-// - Автоматически проверяет, не загружен ли агент
-// - Использует идентификатор пользователя для загрузки в правильный домен
-func Load(log *logger.Logger) (bool, error) {
 
-	if !IsAgentRunning(log) {
-		cmd := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
-		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
-			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
-			log.Error(mess)
-			return false, fmt.Errorf("%s", mess)
-		}
-		return true, nil
-	}
-	mess := "Агент уже загружен посредством launchctl"
-	log.Debug(mess)
-	return true, fmt.Errorf("%s", mess)
-}
 
-// Unload останавливает и выгружает агент из системы launchd.
-//
-// Функция останавливает выполнение агента и удаляет его из списка
-// автоматически запускаемых при загрузке системы.
-//
-// @return bool Флаг успешного выполнения операции
-// @return error Ошибка, если не удалось выгрузить агента
-//
-// Пример использования:
-//
-//	if ok, err := service.Unload(); !ok {
-//	    log.Fatalf("Не удалось выгрузить агента: %v", err)
-//	}
-//
-// Примечания:
-//   - Требует прав администратора
-//   - Игнорирует ошибку "Input/output error", которая может возникать
-//     при попытке выгрузки уже остановленного агента
-func Unload(log *logger.Logger) (bool, error) {
-	if IsAgentRunning(log) {
-		cmd := exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
-		if err := cmd.Run(); err != nil && !strings.Contains(err.Error(), "Boot-out failed: 5: Input/output error") {
-			mess := fmt.Sprintf("не удалось выгрузить агент: %v", err)
-			log.Error(mess)
-			return false, fmt.Errorf("%s", mess)
-		}
-		return true, nil
-	}
-	mess := "Агент уже выгружен посредством launchctl"
-	log.Debug(mess)
-	return true, fmt.Errorf("%s", mess)
-}
+

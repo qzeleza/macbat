@@ -1,4 +1,4 @@
-package main
+package env
 
 import (
 	"fmt"
@@ -11,7 +11,9 @@ import (
 
 // addToPath добавляет директорию в переменную PATH в файле конфигурации оболочки
 // и обновляет текущую сессию
-func addToPath(path string, log *logger.Logger) error {
+// AddToPath добавляет директорию в переменную PATH в файле конфигурации оболочки
+// и обновляет текущую сессию
+func AddToPath(path string, log *logger.Logger) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("не удалось определить домашнюю директорию: %v", err)
@@ -98,7 +100,8 @@ func addToPath(path string, log *logger.Logger) error {
 }
 
 // removeFromPath удаляет директорию из переменной PATH в файле конфигурации оболочки
-func removeFromPath(path string, log *logger.Logger) error {
+// RemoveFromPath удаляет директорию из переменной PATH в файле конфигурации оболочки
+func RemoveFromPath(path string, log *logger.Logger) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("не удалось определить домашнюю директорию: %v", err)
@@ -140,7 +143,8 @@ func removeFromPath(path string, log *logger.Logger) error {
 }
 
 // updateShell обновляет текущую сессию оболочки
-func updateShell(log *logger.Logger) error {
+// UpdateShell обновляет текущую сессию оболочки
+func UpdateShell(log *logger.Logger) error {
 	// Получаем путь к текущей оболочке
 	shell := os.Getenv("SHELL")
 	if shell == "" {

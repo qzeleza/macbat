@@ -1,14 +1,14 @@
-// Пакет main содержит реализацию иконки в системном трее
-package main
+// Пакет tray содержит реализацию иконки в системном трее
+package tray
 
 import (
 	_ "embed"
 	"fmt"
+	"macbat/internal/background"
 	"macbat/internal/battery"
 	"macbat/internal/config"
 	"macbat/internal/logger"
 	"macbat/internal/paths"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,8 +19,23 @@ import (
 	"github.com/getlantern/systray"
 )
 
-// updateMenu обновляет состояние меню в трее
-var updateMu sync.Mutex // защита от параллельного вызова
+var (
+	log      *logger.Logger
+	modeRun  string
+	updateMu sync.Mutex // защита от параллельного вызова
+)
+
+// Start запускает GUI-агент в системном трее.
+func Start(appLog *logger.Logger, mode string) {
+	log = appLog
+	modeRun = mode
+	systray.Run(onReady, onExit)
+}
+
+// onExit будет вызван при выходе из systray.
+func onExit() {
+	log.Info("Выход из приложения systray.")
+}
 
 func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode *systray.MenuItem, conf *config.Config) {
 	updateMu.Lock()
@@ -214,10 +229,8 @@ func onReady() {
 
 			// Нажатие на "Выход"
 			case <-mQuit.ClickedCh:
-				killBackground()
+				background.Kill()
 				systray.Quit()
-				time.Sleep(100 * time.Millisecond)
-				os.Exit(0)
 				return
 			}
 		}
