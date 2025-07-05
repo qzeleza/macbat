@@ -12,6 +12,7 @@ import (
 	"macbat/internal/version"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"golang.org/x/term"
@@ -29,11 +30,19 @@ var (
 // функции
 // ------------------------------------------------------------------
 func main() {
+	// Привязываем горутину к главному потоку ОС. Это необходимо для работы GUI-библиотек,
+	// таких как systray, которые требуют выполнения в основном потоке.
+	runtime.LockOSThread()
 
-	modeRun = "run"
+	const debugMode = true
 
 	// --- Инициализация логгера
-	log = logger.New(paths.LogPath(), 100, true, true)
+	log = logger.New(paths.LogPath(), 100, true, debugMode)
+
+	// !!! --- ОТЛАДКА --- !!!
+	// Выводим все аргументы, с которыми был запущен процесс.
+	// Это поможет понять, передаются ли флаги дочерним процессам.
+	log.Debug(fmt.Sprintf("Приложение запущено с аргументами: %s", strings.Join(os.Args, " ")))
 
 	// --- Инициализация менеджера фоновых процессов ---
 	bgManager := background.New(log)
@@ -159,23 +168,36 @@ func main() {
 
 	// --- Запуск GUI Агента ---
 	if *guiAgentFlag {
-		task := func() {
-			// Запускаем фоновый процесс мониторинга, если он еще не запущен
-			if !bgManager.IsRunning("--background") {
-				log.Info("Запускаем фоновый процесс мониторинга батареи...")
-				bgManager.LaunchDetached("--background")
-			} else {
-				log.Info("Фоновый процесс мониторинга уже запущен.")
-			}
-			log.Line()
-			// Запускаем блокирующий цикл GUI
-			trayApp := tray.New(log, conf, cfgManager, bgManager)
-			trayApp.Start()
+		log.Info("Запуск в режиме GUI-агента...")
+
+		// Захватываем lock-файл и регистрируем обработчики сигналов вручную,
+		// так как systray.Run() должен выполняться в основном потоке.
+		if err := bgManager.Lock("--gui-agent"); err != nil {
+			log.Error(fmt.Sprintf("Не удалось запустить GUI агент: %v", err))
+			return
+		}
+		// Unlock будет вызван при завершении процесса через обработчик сигналов.
+		defer bgManager.Unlock("--gui-agent")
+
+		if err := bgManager.WritePID("--gui-agent"); err != nil {
+			log.Error(fmt.Sprintf("Не удалось записать PID для режима --gui-agent: %v", err))
 		}
 
-		if err := bgManager.Run("--gui-agent", task); err != nil {
-			log.Error(fmt.Sprintf("Не удалось запустить GUI агент: %v", err))
+		bgManager.HandleSignals("--gui-agent")
+
+		// Запускаем фоновый процесс мониторинга, если он еще не запущен
+		if !bgManager.IsRunning("--background") {
+			log.Info("Запускаем фоновый процесс мониторинга батареи...")
+			bgManager.LaunchDetached("--background")
+		} else {
+			log.Info("Фоновый процесс мониторинга уже запущен.")
 		}
+		log.Line()
+
+		// Запускаем блокирующий цикл GUI в основном потоке.
+		trayApp := tray.New(log, conf, cfgManager, bgManager)
+		trayApp.Start()
+
 		return
 	}
 

@@ -67,7 +67,7 @@ func (t *Tray) Start() {
 
 // onExit будет вызван при выходе из systray.
 func (t *Tray) onExit() {
-	t.log.Info("Выход из приложения systray.")
+	// Здесь можно выполнить очистку, если это необходимо.
 }
 
 func (t *Tray) updateMenu() {
@@ -156,7 +156,6 @@ func getBatteryIcon(percent int, isCharging bool) string {
 // onReady инициализирует иконку в трее
 func (t *Tray) onReady() {
 	iconData := getAppIconFromFile()
-	// Используем цветную иконку, а не шаблонную (template), чтобы macOS не перекрашивал её.
 	systray.SetTitle("👀")
 	systray.SetIcon(iconData)
 	systray.SetTooltip("Отслеживание достижения порогов заряда батареи")
