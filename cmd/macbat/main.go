@@ -174,7 +174,7 @@ func main() {
 		}
 		log.Line()
 		// Запускаем блокирующий цикл GUI
-		tray.Start(log, modeRun)
+		tray.Start(log)
 		return
 	}
 

@@ -51,6 +51,7 @@ build: ## Собрать бинарный файл с информацией о 
 
 run: build ## Собрать и запустить приложение
 	@echo "$(GREEN)Запуск $(BINARY_NAME)...$(NC)"
+	killall $(BINARY_NAME)
 	./$(BINARY_NAME)
 
 clean-build: ## Удалить скомпилированный бинарный файл

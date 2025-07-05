@@ -21,14 +21,12 @@ import (
 
 var (
 	log      *logger.Logger
-	modeRun  string
 	updateMu sync.Mutex // защита от параллельного вызова
 )
 
 // Start запускает GUI-агент в системном трее.
-func Start(appLog *logger.Logger, mode string) {
+func Start(appLog *logger.Logger) {
 	log = appLog
-	modeRun = mode
 	systray.Run(onReady, onExit)
 }
 
@@ -37,7 +35,7 @@ func onExit() {
 	log.Info("Выход из приложения systray.")
 }
 
-func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode *systray.MenuItem, conf *config.Config) {
+func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode *systray.MenuItem, conf *config.Config) {
 	updateMu.Lock()
 	defer updateMu.Unlock()
 
@@ -53,11 +51,6 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode *
 		chargeModeStr = "Зарядка"
 	}
 
-	workModeStr := "Штатный"
-	if modeRun == "test" {
-		workModeStr = "Симуляция"
-	}
-
 	// --- Динамический расчет отступов для выравнивания ---
 	labels := []string{
 		"Текущий заряд:",
@@ -66,7 +59,6 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode *
 		"Циклов заряда:",
 		"Здоровье батареи:",
 		"Режим заряда:",
-		"Режим работы:",
 	}
 	maxLength := 0
 	for _, label := range labels {
@@ -94,7 +86,6 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode *
 	}
 	// Обновляем информацию в меню с использованием динамического отступа
 	mChargeMode.SetTitle(fmt.Sprintf("%-21s %s %s", labels[5], chargeModeStr, chargeIcon)) // Режим заряда
-	mWorkMode.SetTitle(fmt.Sprintf("%-20s %s", labels[6], workModeStr))                    // Режим работы
 
 	mMin.SetTitle(fmt.Sprintf("%-21s       %4d%%", labels[1], minThreshold)) // Мин. порог
 	mMax.SetTitle(fmt.Sprintf("%-21s       %4d%%", labels[2], maxThreshold)) // Макс. порог
@@ -135,17 +126,14 @@ func getBatteryIcon(percent int, isCharging bool) string {
 func onReady() {
 	iconData := getAppIconFromFile()
 	// Используем цветную иконку, а не шаблонную (template), чтобы macOS не перекрашивал её.
-	systray.SetTitle("Страж")
+	systray.SetTitle("👀")
 	systray.SetIcon(iconData)
 	systray.SetTooltip("Отслеживание достижения порогов заряда батареи")
 
 	systray.AddSeparator()
 
-	mChargeMode := systray.AddMenuItem("Загрузка...", "Разрядка и зарядка")
+	mChargeMode := systray.AddMenuItem("Режим заряда: ...", "Показывает текущий режим заряда")
 	// mChargeMode.Disable()
-
-	mWorkMode := systray.AddMenuItem("Режим работы: --", "Штатный и симуляция (тестовый режим), запускается с флагом --test")
-	// mWorkMode.Disable()
 
 	systray.AddSeparator()
 
@@ -182,7 +170,7 @@ func onReady() {
 	// чтобы гарантировать завершение инициализации GUI и избежать блокировки.
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode, conf)
+		updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, conf)
 	}()
 
 	// Запускаем тикер для обновления меню каждые 30 секунд
@@ -190,7 +178,7 @@ func onReady() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode, conf)
+			updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, conf)
 		}
 	}()
 
@@ -202,10 +190,6 @@ func onReady() {
 			// Нажатие на "Текущий заряд"
 			case <-mCurrent.ClickedCh:
 				dlgs.Warning("Внимание", "Текущий заряд батареи отображает процент оставшейся ёмкости относительно полной. Следите за этим показателем, чтобы не допускать глубокого разряда или перезаряда аккумулятора.\nРекомендуемые значения: от 20% до 80%.")
-
-			// Нажатие на "Режим работы"
-			case <-mWorkMode.ClickedCh:
-				dlgs.Warning("Внимание", "Режим работы может быть штатным или тестовым (симуляция). В тестовом режиме можно проверить работу уведомлений и автоматического управления зарядом. Запускается с флагом --test")
 
 			// Нажатие на "Режим заряда"
 			case <-mChargeMode.ClickedCh:
@@ -221,11 +205,11 @@ func onReady() {
 
 			// Нажатие на "Мин. порог"
 			case <-mMin.ClickedCh:
-				handleThresholdChange(cfgManager, conf, log, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode, "min")
+				handleThresholdChange(cfgManager, conf, log, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, "min")
 
 			// Нажатие на "Макс. порог"
 			case <-mMax.ClickedCh:
-				handleThresholdChange(cfgManager, conf, log, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode, "max")
+				handleThresholdChange(cfgManager, conf, log, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, "max")
 
 			// Нажатие на "Выход"
 			case <-mQuit.ClickedCh:
@@ -242,7 +226,7 @@ func onReady() {
 // @param conf - текущая конфигурация.
 // @param menuItems - все элементы меню для обновления.
 // @param mode - какой порог меняем ("min" или "max").
-func handleThresholdChange(cfgManager *config.Manager, conf *config.Config, log *logger.Logger, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode *systray.MenuItem, mode string) {
+func handleThresholdChange(cfgManager *config.Manager, conf *config.Config, log *logger.Logger, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode *systray.MenuItem, mode string) {
 	var title, prompt, currentValStr string
 	var currentVal int
 
@@ -304,7 +288,7 @@ func handleThresholdChange(cfgManager *config.Manager, conf *config.Config, log 
 		dlgs.Error("Ошибка сохранения", "Не удалось сохранить новую конфигурацию: "+err.Error())
 	} else {
 		// Обновляем меню немедленно, чтобы показать изменения
-		updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, mWorkMode, conf)
+		updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, conf)
 	}
 }
 
