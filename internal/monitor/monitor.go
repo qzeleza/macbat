@@ -70,13 +70,13 @@ package monitor
 
 import (
 	"fmt"
+	"time"
+
 	"macbat/internal/battery"
 	"macbat/internal/config"
 	"macbat/internal/dialog"
 	"macbat/internal/logger"
-	"time"
-
-	"github.com/fsnotify/fsnotify"
+	"macbat/internal/paths"
 )
 
 //================================================================================
@@ -121,7 +121,7 @@ func NewMonitor(cfg *config.Config, cfgManager *config.Manager, logger *logger.L
 
 // Start запускает основной цикл работы монитора с поддержкой обновления конфигурации.
 // Этот метод является блокирующим и должен выполняться в главной горутине фонового процесса.
-// 
+//
 // @param mode Режим работы (например, "simulate").
 // @param started Канал для сигнала о том, что монитор успешно запущен.
 // @return Ничего.
@@ -131,7 +131,7 @@ func (m *Monitor) Start(mode string, started chan<- struct{}) {
 	// Создаем канал, по которому будем получать обновленную конфигурацию.
 	configUpdateChan := make(chan *config.Config)
 	// Запускаем наблюдателя за файлом в отдельной горутине.
-	go m.watchConfigFile(configUpdateChan)
+	go config.Watch(paths.ConfigPath(), configUpdateChan, m.notifier)
 
 	// Определяем источник данных о батарее (реальный или симулятор).
 	var provider batteryInfoProvider
@@ -212,53 +212,6 @@ func (m *Monitor) applyNewConfig(newCfg *config.Config, ticker *time.Ticker) {
 	ticker.Reset(time.Duration(newInterval) * time.Second)
 	m.notifier.Info("Новая конфигурация успешно применена.")
 
-}
-
-// watchConfigFile - это функция, работающая в фоне и следящая за изменениями в config.json.
-//
-// @param updateChan Канал для отправки обновленной конфигурации.
-func (m *Monitor) watchConfigFile(updateChan chan<- *config.Config) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		m.notifier.Error(fmt.Sprintf("Критическая ошибка: не удалось создать наблюдателя за файлами: %v", err))
-		return
-	}
-	defer watcher.Close()
-
-	configPath := m.cfgManager.ConfigPath()
-	err = watcher.Add(configPath)
-	if err != nil {
-		m.notifier.Error(fmt.Sprintf("Критическая ошибка: не удалось добавить файл %s в наблюдение: %v", configPath, err))
-		return
-	}
-
-	m.notifier.Info(fmt.Sprintf("Наблюдатель запущен для файла: %s", configPath))
-
-	for {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			if event.Op&fsnotify.Write == fsnotify.Write {
-				m.notifier.Info(fmt.Sprintf("Обнаружено изменение в файле конфигурации: %s. Перезагрузка...", event.Name))
-				time.Sleep(100 * time.Millisecond) // Короткая пауза на случай множественных событий сохранения от редактора.
-
-				newCfg, err := m.cfgManager.Load()
-				if err != nil {
-					m.notifier.Error(fmt.Sprintf("Не удалось перезагрузить конфигурацию после изменения: %v", err))
-					continue
-				}
-				// Отправляем новую конфигурацию в основной цикл через канал.
-				updateChan <- newCfg
-			}
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			m.notifier.Error(fmt.Sprintf("Ошибка наблюдателя за файлами: %v", err))
-		}
-	}
 }
 
 // getCheckInterval определяет текущий интервал проверки на основе состояния зарядки.

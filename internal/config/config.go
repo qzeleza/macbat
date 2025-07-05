@@ -27,16 +27,16 @@ type NotificationState struct {
 
 // Config содержит все настраиваемые параметры приложения.
 type Config struct {
-	MinThreshold                 int    `json:"min_threshold"`
-	MaxThreshold                 int    `json:"max_threshold"`
-	CheckIntervalWhenCharging    int    `json:"check_interval_charging"`
-	CheckIntervalWhenDischarging int    `json:"check_interval_discharging"`
-	NotificationInterval         int    `json:"notification_interval"`
-	MaxNotifications             int    `json:"max_notifications"`
-	DebugEnabled                 bool   `json:"debug_enabled"`
-	LogFilePath                  string `json:"log_file_path"`
-	LogRotationLines             int    `json:"log_rotation_lines"`
-	LogEnabled                   bool   `json:"log_enabled"`
+	MinThreshold                 int    `json:"min_threshold"`              // Минимальный порог заряда
+	MaxThreshold                 int    `json:"max_threshold"`              // Максимальный порог заряда
+	CheckIntervalWhenCharging    int    `json:"check_interval_charging"`    // Интервал проверки при зарядке
+	CheckIntervalWhenDischarging int    `json:"check_interval_discharging"` // Интервал проверки при разрядке
+	NotificationInterval         int    `json:"notification_interval"`      // Интервал уведомлений
+	MaxNotifications             int    `json:"max_notifications"`          // Максимальное количество уведомлений
+	DebugEnabled                 bool   `json:"debug_enabled"`              // Включить отладку
+	LogFilePath                  string `json:"log_file_path"`              // Путь к файлу логов
+	LogRotationLines             int    `json:"log_rotation_lines"`         // Количество строк в файле логов
+	LogEnabled                   bool   `json:"log_enabled"`                // Включить логирование
 }
 
 // Manager инкапсулирует всю логику управления конфигурацией.

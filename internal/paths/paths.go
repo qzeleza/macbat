@@ -5,6 +5,7 @@ package paths
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -98,4 +99,17 @@ func LockPath(processType string) string {
 	// Удаляем префиксы, чтобы имя файла было чище
 	cleanProcessType := strings.TrimPrefix(processType, "--")
 	return filepath.Join(os.TempDir(), AppName+"."+cleanProcessType+".lock")
+}
+
+// OpenFileOrDir открывает указанный путь (файл или директорию) с помощью
+// приложения по умолчанию в macOS.
+// @param path - Путь к файлу или директории.
+// @return error - Ошибка, если не удалось запустить команду.
+func OpenFileOrDir(path string) error {
+	// Команда "open" в macOS является стандартным способом
+	// открытия файлов и директорий в ассоциированных с ними приложениях.
+	cmd := exec.Command("open", path)
+	// Мы используем Start(), а не Run() или Output(), потому что нам не нужно
+	// ждать завершения команды. Мы просто хотим "запустить и забыть".
+	return cmd.Start()
 }

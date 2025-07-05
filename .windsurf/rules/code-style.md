@@ -1,5 +1,5 @@
 ---
-trigger: always_on
+trigger: model_decision
 ---
 
 1. Код пиши на vue используя библиотеку PrimeVue
