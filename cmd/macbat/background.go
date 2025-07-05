@@ -175,8 +175,8 @@ func writePID() error {
 	return nil
 }
 
-// killBackgroundGo находит и завершает фоновый процесс.
-func killBackgroundGo() {
+// killBackground находит и завершает фоновый процесс.
+func killBackground() {
 	pidPath := paths.PIDPath()
 	log.Info(fmt.Sprintf("Попытка завершить фоновый процесс через PID файл: %s", pidPath))
 

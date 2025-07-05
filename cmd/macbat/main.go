@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/getlantern/systray"
 	"golang.org/x/term"
@@ -35,12 +37,46 @@ func main() {
 	}
 
 	// --- Обработка флагов командной строки ---
-	installFlag := flag.Bool("install", false, "Установить приложение и агент launchd")
-	uninstallFlag := flag.Bool("uninstall", false, "Удалить приложение и агент launchd")
-	backgroundFlag := flag.Bool("background", false, "Запуск фонового процесса мониторинга")
-	guiAgentFlag := flag.Bool("gui-agent", false, "Внутренний флаг для запуска GUI агента")
-	testFlag := flag.Bool("test", false, "Запуск тестового режима")
+	installFlag := flag.Bool("install", false, "Устанавливает приложение и запускает агента launchd")
+	uninstallFlag := flag.Bool("uninstall", false, "Удаляет приложение и агента launchd")
+	backgroundFlag := flag.Bool("background", false, "Запускает фоновый процесс мониторинга (для опытных пользователей)")
+	guiAgentFlag := flag.Bool("gui-agent", false, "Запускает GUI агента")
+	testFlag := flag.Bool("test", false, "Запускает тестовый режим (для опытных пользователей)")
+	logFlag := flag.Bool("log", false, "Отображает журнал")
+	configFlag := flag.Bool("config", false, "Открывает файл конфигурации для редактирования (для опытных пользователей)")
+
+	// --- Обработка флагов командной строки ---
 	flag.Parse()
+
+	if *configFlag {
+		log.Line()
+		log.Info("Открытие конфигурации...")
+		editor := "nano"
+		configPath := paths.ConfigPath()
+		cmd := exec.Command(editor, configPath)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Error(fmt.Sprintf("Ошибка запуска редактора nano: %v", err))
+		}
+		log.Info("Конфигурация отредактирована.")
+		log.Line()
+		return
+	}
+
+	// --- Логика отображения логов ---
+	if *logFlag {
+		logs, err := os.ReadFile(paths.LogPath())
+		if err != nil {
+			fmt.Println("Ошибка чтения лог-файла:", err)
+		} else {
+			fmt.Println("\n---- Журнал приложения ----")
+			fmt.Println(string(logs))
+			fmt.Printf("%s\n", strings.Repeat("-", 80))
+			return
+		}
+	}
 
 	// --- Логика установки/удаления ---
 	if *installFlag || !isAppInstalled(log) {
@@ -68,7 +104,7 @@ func main() {
 	// --- Логика тестового режима ---
 	if *testFlag {
 		log.Line()
-		killBackgroundGo() // Завершаем фоновый процесс
+		killBackground() // Завершаем фоновый процесс
 		// Запускаем основную задачу мониторинга в тестовом режиме
 		log.Info("Запуск мониторинга батареи в тестовом режиме...")
 		modeRun = "test"
