@@ -16,19 +16,12 @@ import (
 	"time"
 )
 
-var log *logger.Logger
-
-func init() {
-	// Инициализируем логгер для фонового процесса
-	log = logger.New(paths.LogPath(), 10000, true, false)
-}
-
 //================================================================================
 // ЭКСПОРТИРУЕМЫЕ ФУНКЦИИ
 //================================================================================
 
 // IsGUIRunning проверяет, запущен ли GUI процесс, по lock-файлу.
-func IsGUIRunning() bool {
+func IsGUIRunning(log *logger.Logger) bool {
 	lockFile := paths.GUILockPath()
 	pidBytes, err := os.ReadFile(lockFile)
 	if err != nil {
@@ -36,11 +29,13 @@ func IsGUIRunning() bool {
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
 	if err != nil {
+		log.Info(fmt.Sprintf("Поврежденный lock-файл GUI, удаляем: %s", lockFile))
 		_ = os.Remove(lockFile) // Поврежденный файл, удаляем.
 		return false
 	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
+		log.Info(fmt.Sprintf("Процесс GUI не найден, удаляем устаревший lock-файл: %s", lockFile))
 		_ = os.Remove(lockFile) // Процесс не найден, устаревший файл.
 		return false
 	}
@@ -48,12 +43,13 @@ func IsGUIRunning() bool {
 	if err = process.Signal(syscall.Signal(0)); err == nil {
 		return true // Процесс существует.
 	}
+	log.Info(fmt.Sprintf("Процесс GUI не отвечает, удаляем устаревший lock-файл: %s", lockFile))
 	_ = os.Remove(lockFile) // Процесс не существует, устаревший файл.
 	return false
 }
 
 // LaunchDetached запускает копию приложения с указанным флагом в отсоединенном режиме.
-func LaunchDetached(flag string) {
+func LaunchDetached(flag string, log *logger.Logger) {
 	log.Info(fmt.Sprintf("Запуск отсоединенного процесса с флагом: %s", flag))
 
 	cmd := exec.Command(paths.BinaryPath(), flag)
@@ -69,7 +65,7 @@ func LaunchDetached(flag string) {
 }
 
 // Run - это основная логика приложения, которая работает в фоне.
-func Run(cfg *config.Config, cfgManager *config.Manager, mode string) {
+func Run(log *logger.Logger, cfg *config.Config, cfgManager *config.Manager, mode string) {
 	log.Info("Фоновый процесс проверки заряда батареи начал работу.")
 
 	// Настраиваем канал для обработки сигналов завершения.
@@ -101,8 +97,8 @@ func Run(cfg *config.Config, cfgManager *config.Manager, mode string) {
 }
 
 // IsRunning проверяет, запущен ли фоновый процесс, по PID-файлу.
-func IsRunning() bool {
-	pidPath := paths.PIDPath()
+func IsRunning(log *logger.Logger) bool {
+	pidPath := paths.PIDBackgoundPath()
 	pidBytes, err := os.ReadFile(pidPath)
 	if err != nil {
 		// Если файл не читается, считаем, что процесс не запущен.
@@ -111,25 +107,31 @@ func IsRunning() bool {
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
 	if err != nil {
-		// Некорректный PID в файле.
+		log.Info(fmt.Sprintf("Поврежденный PID-файл, удаляем: %s", pidPath))
+		_ = os.Remove(pidPath)
 		return false
 	}
 
 	// Проверяем, существует ли процесс с таким PID.
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		// Процесс не найден.
+		log.Info(fmt.Sprintf("Процесс не найден, удаляем устаревший PID-файл: %s", pidPath))
+		_ = os.Remove(pidPath)
 		return false
 	}
 
 	// Отправка сигнала 0 - это стандартный способ проверить существование процесса в Unix-системах.
 	err = process.Signal(syscall.Signal(0))
+	if err != nil {
+		log.Info(fmt.Sprintf("Процесс не отвечает, удаляем устаревший PID-файл: %s", pidPath))
+		_ = os.Remove(pidPath)
+	}
 	return err == nil
 }
 
 // WritePID записывает PID текущего процесса в файл.
-func WritePID() error {
-	pidPath := paths.PIDPath()
+func WritePID(log *logger.Logger) error {
+	pidPath := paths.PIDBackgoundPath()
 	pid := os.Getpid()
 	log.Info(fmt.Sprintf("Запись PID %d в файл: %s", pid, pidPath))
 
@@ -149,47 +151,62 @@ func WritePID() error {
 	return nil
 }
 
-// Kill находит и завершает фоновый процесс.
-func Kill() {
-	pidPath := paths.PIDPath()
-	log.Info(fmt.Sprintf("Попытка завершить фоновый процесс через PID файл: %s", pidPath))
+// Kill находит и завершает указанный процесс (background или gui).
+// В качестве аргумента принимает логгер и тип процесса: "background" или "gui".
+func Kill(log *logger.Logger, processType string) {
+	var pidPath string
 
-	// Проверяем, существует ли PID файл.
-	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
-		log.Info("PID файл не найден. Возможно, фоновый процесс не запущен или уже завершен.")
+	// Определяем путь к PID/Lock файлу в зависимости от типа процесса.
+	switch processType {
+	case "--background":
+		pidPath = paths.PIDBackgoundPath()
+	case "--gui-agent":
+		pidPath = paths.GUILockPath()
+	default:
+		log.Error(fmt.Sprintf("Неизвестный тип процесса для завершения: %s", processType))
 		return
 	}
+
+	log.Info(fmt.Sprintf("Попытка завершить процесс типа '%s', используя PID файл: %s", processType, pidPath))
 
 	// Читаем PID из файла.
 	pidBytes, err := os.ReadFile(pidPath)
 	if err != nil {
-		log.Error(fmt.Sprintf("Не удалось прочитать PID файл: %v", err))
+		if os.IsNotExist(err) {
+			log.Info(fmt.Sprintf("PID файл для процесса '%s' не найден. Процесс, вероятно, не запущен.", processType))
+		} else {
+			log.Error(fmt.Sprintf("Не удалось прочитать PID файл для процесса '%s': %v", processType, err))
+		}
 		return
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
 	if err != nil {
-		log.Error(fmt.Sprintf("Не удалось преобразовать PID из файла: %v", err))
+		log.Error(fmt.Sprintf("Неверный формат PID в файле для процесса '%s': %v", processType, err))
+		_ = os.Remove(pidPath)
 		return
 	}
 
 	// Находим процесс по PID.
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		log.Error(fmt.Sprintf("Не удалось найти процесс с PID %d: %v", pid, err))
+		log.Error(fmt.Sprintf("Не удалось найти процесс '%s' с PID %d: %v", processType, pid, err))
+		_ = os.Remove(pidPath)
 		return
 	}
 
 	// Отправляем сигнал завершения.
-	log.Info(fmt.Sprintf("Отправка сигнала SIGTERM процессу с PID %d", pid))
+	log.Info(fmt.Sprintf("Отправка сигнала SIGTERM процессу '%s' с PID %d", processType, pid))
 	if err := process.Signal(syscall.SIGTERM); err != nil {
 		log.Error(fmt.Sprintf("Не удалось отправить сигнал SIGTERM процессу %d: %v", pid, err))
 	} else {
 		log.Info(fmt.Sprintf("Сигнал SIGTERM успешно отправлен процессу %d", pid))
 	}
 
-	// Удаляем PID файл после попытки завершения.
+	// Удаляем PID файл после отправки сигнала.
 	if err := os.Remove(pidPath); err != nil {
-		log.Error(fmt.Sprintf("Не удалось удалить PID файл: %v", err))
+		log.Error(fmt.Sprintf("Не удалось удалить PID файл для процесса '%s': %v", processType, err))
+	} else {
+		log.Info(fmt.Sprintf("PID файл для процесса '%s' успешно удален.", processType))
 	}
 }

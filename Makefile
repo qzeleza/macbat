@@ -1,15 +1,31 @@
 # Makefile для тестирования модуля батареи MacBat
 # РАБОЧАЯ ВЕРСИЯ - правильная работа с test_*.go
 
-.PHONY: all test test-fixed test-unit test-coverage test-bench test-race \
+.PHONY: all build run test test-fixed test-unit test-coverage test-bench test-race \
 	test-memory test-threading test-debug test-specific check-test-files \
 	setup-links cleanup-links rename-to-standard restore-from-standard \
-	lint fmt vet deps clean quick dev info help
+	lint fmt vet deps clean clean-build quick dev info help
 
 # Переменные
 PACKAGE = ./...
 COVERAGE_FILE = coverage.out
 COVERAGE_HTML = coverage.html
+
+# --- Переменные для сборки ---
+BINARY_NAME=macbat
+MAIN_PATH=./cmd/macbat
+
+# Информация о версии, получаемая из Git.
+# Получаем последний тег. Если тегов нет, используется 'dev'.
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+COMMIT_HASH ?= $(shell git rev-parse --short HEAD)
+BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+# Флаги компоновщика для внедрения информации о версии в бинарный файл.
+LDFLAGS = -ldflags="\
+    -X 'macbat/internal/version.Version=$(VERSION)' \
+    -X 'macbat/internal/version.CommitHash=$(COMMIT_HASH)' \
+    -X 'macbat/internal/version.BuildDate=$(BUILD_DATE)'"
 
 # Находим файлы test_*.go
 TEST_PREFIX_FILES = $(shell find . -name "test_*.go" -type f)
@@ -22,6 +38,25 @@ BLUE = \033[34m
 NC = \033[0m
 
 all: test
+
+# --- Цели для сборки ---
+
+build: ## Собрать бинарный файл с информацией о версии
+	@echo "$(GREEN)Сборка $(BINARY_NAME)...$(NC)"
+	@echo "  Версия: $(VERSION)"
+	@echo "  Коммит: $(COMMIT_HASH)"
+	@echo "  Дата: $(BUILD_DATE)"
+	go build $(LDFLAGS) -o $(BINARY_NAME) $(MAIN_PATH)
+	@echo "$(GREEN)Сборка завершена: ./$(BINARY_NAME)$(NC)"
+
+run: build ## Собрать и запустить приложение
+	@echo "$(GREEN)Запуск $(BINARY_NAME)...$(NC)"
+	./$(BINARY_NAME)
+
+clean-build: ## Удалить скомпилированный бинарный файл
+	@echo "$(YELLOW)Очистка сборки...$(NC)"
+	@rm -f $(BINARY_NAME)
+	@echo "$(GREEN)Очистка завершена.$(NC)"
 
 help: ## Показать справку по командам
 	@echo "$(GREEN)MacBat Test Makefile$(NC)"

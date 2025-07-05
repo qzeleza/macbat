@@ -192,7 +192,6 @@ func allStringsExistInFile(filePath string, requiredStrings []string, log *logge
 // - Возвращает false в случае ошибки выполнения команды
 // - Проверяет только активные процессы, не статус загрузки
 func IsAgentRunning(log *logger.Logger) bool {
-	log.Debug("Проверка статуса агента...")
 	agentID := paths.AgentIdentifier()
 	cmd := exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/"+agentID, os.Getuid()))
 	output, err := cmd.CombinedOutput()
@@ -201,8 +200,8 @@ func IsAgentRunning(log *logger.Logger) bool {
 		return false
 	}
 
-	log.Debug(fmt.Sprintf("Вывод launchctl: %s", string(output)))
-
+	log.Debug("Проверка статуса агента, state = " + strings.TrimSpace(strings.Split(string(output), "state = ")[1][:strings.Index(strings.Split(string(output), "state = ")[1], "\n")]))
+	log.Line()
 	// Проверяем, что PID существует и процесс не является \"Could not find service\"
 	return strings.Contains(string(output), agentID) && !strings.Contains(string(output), "Could not find service")
 }
@@ -210,7 +209,6 @@ func IsAgentRunning(log *logger.Logger) bool {
 // removeOldFiles удаляет старые файлы конфигурации и логов.
 func removeOldFiles(log *logger.Logger) error {
 	filesToRemove := []string{
-		paths.PlistPath(),
 		paths.LogPath(),
 		paths.ErrorLogPath(),
 	}

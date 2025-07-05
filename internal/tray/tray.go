@@ -229,7 +229,7 @@ func onReady() {
 
 			// Нажатие на "Выход"
 			case <-mQuit.ClickedCh:
-				background.Kill()
+				background.Kill(log, "--background")
 				systray.Quit()
 				return
 			}

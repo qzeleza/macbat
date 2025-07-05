@@ -84,7 +84,7 @@ func AgentIdentifier() string {
 
 // PIDPath возвращает путь к файлу PID.
 // @return string - путь к macbat.pid
-func PIDPath() string {
+func PIDBackgoundPath() string {
 	return "/tmp/" + AppName + ".pid"
 }
 

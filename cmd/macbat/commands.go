@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"macbat/internal/background"
 	"macbat/internal/config"
 	"macbat/internal/env"
 	"macbat/internal/logger"
@@ -215,8 +216,12 @@ func createPlistFile(binPath string, log *logger.Logger, cfg *config.Config) err
 // - Требует прав администратора
 // - Не удаляет пользовательские конфигурации
 // - Автоматически обновляет PATH в текущей сессии
-func Uninstall(log *logger.Logger) error {
+func Uninstall(log *logger.Logger, cfg *config.Config) error {
 	log.Info("Начало удаления приложения")
+
+	// Завершаем все запущенные процессы
+	background.Kill(log, "--background")
+	background.Kill(log, "--gui-agent")
 	// Получаем путь к директории с бинарником перед удалением
 	binDir := paths.BinaryPath()
 
