@@ -137,6 +137,10 @@ func main() {
 		}
 		log.Line()
 
+		if !monitor.IsAgentRunning(log) {
+			log.Info("Агент не запущен. Запуск...")
+			monitor.LoadAgent(log)
+		}
 		// Запускаем основную задачу мониторинга в обычном режиме
 		log.Info("Запуск мониторинга батареи в обычном режиме...")
 		background.Run(conf, cfgManager, modeRun) // Запускаем основную задачу мониторинга

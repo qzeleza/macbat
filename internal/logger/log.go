@@ -166,19 +166,3 @@ func (l *Logger) rotate() error {
 	l.currentLines = 0
 	return nil
 }
-
-//================================================================================
-// МЕТОДЫ СИСТЕМНЫХ УВЕДОМЛЕНИЙ
-//================================================================================
-
-// ShowHighBatteryNotification отправляет уведомление о высоком заряде батареи.
-func (l *Logger) ShowHighBatteryNotification(message string) error {
-	l.Info(fmt.Sprintf("Отправка уведомления о высоком заряде: %s", message))
-	return l.ShowDialogNotification("Внимание: Высокий заряд батареи", message)
-}
-
-// ShowLowBatteryNotification отправляет уведомление о низком заряде батареи.
-func (l *Logger) ShowLowBatteryNotification(message string) error {
-	l.Info(fmt.Sprintf("Отправка уведомления о низком заряде: %s", message))
-	return l.ShowDialogNotification("Внимание: Низкий заряд батареи", message)
-}

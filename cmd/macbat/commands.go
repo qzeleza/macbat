@@ -22,16 +22,16 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 
 	// 1. Определяем пути
 	binPath := paths.BinaryPath()
-	binDir := paths.InstallDir()
-	currentBin, err := os.Executable()
-	if err != nil {
-		mess := fmt.Sprintf("не удалось определить путь к текущему исполняемому файлу: %v", err)
-		log.Error(mess)
-		return fmt.Errorf(mess)
-	}
+	binDir := paths.BinaryPath()
+	// currentBin, err := os.Executable()
+	// if err != nil {
+	// 	mess := fmt.Sprintf("не удалось определить путь к текущему исполняемому файлу: %v", err)
+	// 	log.Error(mess)
+	// 	return fmt.Errorf("%s", mess)
+	// }
 
 	log.Debug(fmt.Sprintf("Целевой путь бинарника: %s", binPath))
-	log.Debug(fmt.Sprintf("Текущий путь бинарника: %s", currentBin))
+	// log.Debug(fmt.Sprintf("Текущий путь бинарника: %s", currentBin))
 
 	// Создаем директорию для логов
 	if err := createLogDirectory(log); err != nil {
@@ -39,21 +39,21 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 	}
 
 	// Создаем директорию для бинарника
-	if err := createBinaryDirectory(binDir, log); err != nil {
-		return err
-	}
+	// if err := createBinaryDirectory(binDir, log); err != nil {
+	// 	return err
+	// }
 
 	// Проверяем права на запись
-	if err := utils.CheckWriteAccess(binDir, log); err != nil {
-		mess := fmt.Sprintf("нет прав на запись в %s: %v", binDir, err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
+	// if err := utils.CheckWriteAccess(binDir, log); err != nil {
+	// 	mess := fmt.Sprintf("нет прав на запись в %s: %v", binDir, err)
+	// 	log.Error(mess)
+	// 	return fmt.Errorf("%s", mess)
+	// }
 
-	// Копируем бинарник
-	if err := copyBinary(currentBin, binPath, log); err != nil {
-		return err
-	}
+	// // Копируем бинарник
+	// if err := copyBinary(currentBin, binPath, log); err != nil {
+	// 	return err
+	// }
 
 	// Добавляем директорию в PATH
 	addPathToEnvironment(binDir, log)
@@ -70,8 +70,6 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 	return nil
 }
 
-
-
 func createLogDirectory(log *logger.Logger) error {
 	logDir := filepath.Dir(paths.LogPath())
 	log.Debug(fmt.Sprintf("Создание директории для логов: %s", logDir))
@@ -83,31 +81,31 @@ func createLogDirectory(log *logger.Logger) error {
 	return nil
 }
 
-func createBinaryDirectory(binDir string, log *logger.Logger) error {
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		mess := fmt.Sprintf("не удалось создать директорию %s: %v", binDir, err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	return nil
-}
+// func createBinaryDirectory(binDir string, log *logger.Logger) error {
+// 	if err := os.MkdirAll(binDir, 0755); err != nil {
+// 		mess := fmt.Sprintf("не удалось создать директорию %s: %v", binDir, err)
+// 		log.Error(mess)
+// 		return fmt.Errorf("%s", mess)
+// 	}
+// 	return nil
+// }
 
-func copyBinary(currentBin, binPath string, log *logger.Logger) error {
-	log.Debug(fmt.Sprintf("Копирование бинарника из %s в %s", currentBin, binPath))
-	data, err := os.ReadFile(currentBin)
-	if err != nil {
-		mess := fmt.Sprintf("не удалось прочитать бинарник: %v", err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	if err := os.WriteFile(binPath, data, 0755); err != nil {
-		mess := fmt.Sprintf("не удалось записать бинарник в %s: %v", binPath, err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	log.Debug(fmt.Sprintf("Бинарник успешно записан: %s", binPath))
-	return nil
-}
+// func copyBinary(currentBin, binPath string, log *logger.Logger) error {
+// 	log.Debug(fmt.Sprintf("Копирование бинарника из %s в %s", currentBin, binPath))
+// 	data, err := os.ReadFile(currentBin)
+// 	if err != nil {
+// 		mess := fmt.Sprintf("не удалось прочитать бинарник: %v", err)
+// 		log.Error(mess)
+// 		return fmt.Errorf("%s", mess)
+// 	}
+// 	if err := os.WriteFile(binPath, data, 0755); err != nil {
+// 		mess := fmt.Sprintf("не удалось записать бинарник в %s: %v", binPath, err)
+// 		log.Error(mess)
+// 		return fmt.Errorf("%s", mess)
+// 	}
+// 	log.Debug(fmt.Sprintf("Бинарник успешно записан: %s", binPath))
+// 	return nil
+// }
 
 func addPathToEnvironment(binDir string, log *logger.Logger) {
 	if err := env.AddToPath(binDir, log); err != nil {
@@ -126,8 +124,6 @@ func addPathToEnvironment(binDir string, log *logger.Logger) {
 		}
 	}
 }
-
-
 
 // createPlistFile создает файл конфигурации для launchd в формате plist.
 //
@@ -222,7 +218,7 @@ func createPlistFile(binPath string, log *logger.Logger, cfg *config.Config) err
 func Uninstall(log *logger.Logger) error {
 	log.Info("Начало удаления приложения")
 	// Получаем путь к директории с бинарником перед удалением
-	binDir := paths.InstallDir()
+	binDir := paths.BinaryPath()
 
 	// Выгружаем агент
 	log.Info("Выгрузка агента...")
@@ -253,8 +249,6 @@ func Uninstall(log *logger.Logger) error {
 	log.Info("Удаление приложения завершено")
 	return nil
 }
-
-
 
 func removePlistFile(log *logger.Logger) error {
 	plistPath := paths.PlistPath()
@@ -311,7 +305,3 @@ func removeAllFiles(log *logger.Logger) {
 		}
 	}
 }
-
-
-
-

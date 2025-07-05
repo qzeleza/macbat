@@ -14,10 +14,14 @@ const AppName = "macbat"
 // BinaryPath возвращает путь к бинарному файлу приложения.
 // @return string - путь к бинарнику
 func BinaryPath() string {
-	// Возвращаем канонический путь, куда приложение устанавливается.
-	// Это обеспечивает стабильность при запуске отсоединенных процессов,
-	// так как os.Executable() может указывать на временный файл при `go run`.
-	return filepath.Join(InstallDir(), AppName)
+	// os.Executable() возвращает полный путь к текущему исполняемому файлу.
+	// Это именно то, что нужно для запуска копии процесса.
+	binPath, err := os.Executable()
+	if err != nil {
+		// В случае ошибки возвращаем базовое имя, предполагая, что оно в PATH.
+		return AppName
+	}
+	return binPath
 }
 
 // ConfigPath возвращает путь к файлу конфигурации.
@@ -88,10 +92,4 @@ func PIDPath() string {
 // @return string - путь к macbat.gui.lock
 func GUILockPath() string {
 	return "/tmp/" + AppName + ".gui.lock"
-}
-
-// InstallDir возвращает путь к директории установки приложения.
-// @return string - путь к директории установки
-func InstallDir() string {
-	return "/usr/local/bin"
 }

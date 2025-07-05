@@ -63,7 +63,7 @@ func IsAppInstalled(log *logger.Logger) bool {
 
 	if ok {
 		// Проверяем запущен ли агент
-		if isAgentRunning(log) {
+		if IsAgentRunning(log) {
 			log.Debug("Агент запущен...")
 		} else {
 			log.Debug("Агент не запущен. Запуск...")
@@ -191,7 +191,7 @@ func allStringsExistInFile(filePath string, requiredStrings []string, log *logge
 // - Не требует прав администратора
 // - Возвращает false в случае ошибки выполнения команды
 // - Проверяет только активные процессы, не статус загрузки
-func isAgentRunning(log *logger.Logger) bool {
+func IsAgentRunning(log *logger.Logger) bool {
 	log.Debug("Проверка статуса агента...")
 	agentID := paths.AgentIdentifier()
 	cmd := exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/"+agentID, os.Getuid()))
@@ -248,7 +248,7 @@ func loadAgent(log *logger.Logger) error {
 // @return error Ошибка, если не удалось загрузить агента
 func LoadAgent(log *logger.Logger) (bool, error) {
 
-	if !isAgentRunning(log) {
+	if !IsAgentRunning(log) {
 		cmd := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
 		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
 			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
@@ -270,7 +270,7 @@ func LoadAgent(log *logger.Logger) (bool, error) {
 // @return bool Флаг успешного выполнения операции
 // @return error Ошибка, если не удалось выгрузить агента
 func UnloadAgent(log *logger.Logger) (bool, error) {
-	if isAgentRunning(log) {
+	if IsAgentRunning(log) {
 		cmd := exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
 		if err := cmd.Run(); err != nil && !strings.Contains(err.Error(), "Boot-out failed: 5: Input/output error") {
 			mess := fmt.Sprintf("не удалось выгрузить агент: %v", err)

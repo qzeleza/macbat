@@ -72,6 +72,7 @@ import (
 	"fmt"
 	"macbat/internal/battery"
 	"macbat/internal/config"
+	"macbat/internal/dialog"
 	"macbat/internal/logger"
 	"macbat/internal/simulator"
 	"time"
@@ -340,7 +341,7 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 		// Отправляем уведомление
 		m.notifier.Check(message)
 		// Отображаем уведомление
-		if err := m.notifier.ShowLowBatteryNotification(message); err != nil {
+		if err := dialog.ShowLowBatteryNotification(message, m.notifier); err != nil {
 			m.notifier.Error(err.Error())
 		}
 
@@ -372,7 +373,7 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 			remaining,
 		)
 		m.notifier.Check(message) // Отправляем уведомление.
-		if err := m.notifier.ShowHighBatteryNotification(message); err != nil {
+		if err := dialog.ShowHighBatteryNotification(message, m.notifier); err != nil {
 			m.notifier.Error(err.Error())
 		}
 
