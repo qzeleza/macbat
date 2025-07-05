@@ -12,7 +12,6 @@ import (
 	"macbat/internal/version"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 
 	"golang.org/x/term"
@@ -33,8 +32,11 @@ func main() {
 
 	modeRun = "run"
 
-	// Инициализация логгера
+	// --- Инициализация логгера
 	log = logger.New(paths.LogPath(), 100, true, true)
+
+	// --- Инициализация менеджера фоновых процессов ---
+	bgManager := background.New(log)
 
 	// --- Инициализация конфигурации ---
 	cfgManager, err := config.New(log, paths.ConfigPath())
@@ -54,14 +56,24 @@ func main() {
 	logFlag := flag.Bool("log", false, "Отображает журнал")
 	configFlag := flag.Bool("config", false, "Открывает файл конфигурации для редактирования (для опытных пользователей)")
 	versionFlag := flag.Bool("version", false, "Отображает версию")
+	helpFlag := flag.Bool("help", false, "Отображает помощь")
 
 	// --- Обработка флагов командной строки ---
 	flag.Parse()
 
+	// --- Вывод справки о флагах командной строки ---
+	if *helpFlag {
+		flag.Usage()
+		return
+	}
+
+	// --- Вывод версии приложения ---
 	if *versionFlag {
 		fmt.Printf("Версия macbat: %s\nХеш коммита: %s\nДата сборки: %s\n", version.Version, version.CommitHash, version.BuildDate)
 		return
 	}
+
+	// --- Редактирование конфигурации ---
 	if *configFlag {
 		log.Line()
 		log.Info("Открытие конфигурации...")
@@ -79,7 +91,7 @@ func main() {
 		return
 	}
 
-	// --- Логика отображения логов ---
+	// --- Отображение логов ---
 	if *logFlag {
 		logs, err := os.ReadFile(paths.LogPath())
 		if err != nil {
@@ -92,7 +104,7 @@ func main() {
 		}
 	}
 
-	// --- Логика установки/удаления ---
+	// --- Установка/удаление приложения ---
 	if *installFlag || !monitor.IsAppInstalled(log) {
 		log.Line()
 		log.Info("Установка приложения...")
@@ -115,83 +127,68 @@ func main() {
 		return
 	}
 
-	// --- Логика фонового процесса ---
+	// --- Запуск фонового процесса ---
 	if *backgroundFlag {
-
-		// Если фоновый процесс уже запущен, то выходим
-		if background.IsRunning(log) {
-			log.Info("Фоновый процесс уже запущен. Выход.")
-			return
-		}
-		log.Line()
-
 		// Если запущен в терминале, перезапускаем в фоновом режиме и выходим
 		if term.IsTerminal(int(os.Stdout.Fd())) {
-			background.LaunchDetached("--background", log)
+			if bgManager.IsRunning("--background") {
+				log.Info("Фоновый процесс уже запущен. Выход.")
+				return
+			}
+			bgManager.LaunchDetached("--background")
 			log.Info("Перезапуск в фоновом режиме для отсоединения от терминала.")
 			return
 		}
 
 		// Если мы здесь, значит процесс уже отсоединен от терминала
-		// Записываем PID файл
-		if err := background.WritePID(log); err != nil {
-			log.Error(fmt.Sprintf("Не удалось записать PID файла: %v", err))
+		log.Info("Запускаем основную задачу мониторинга в фоновом режиме...")
+		task := func() {
+			if !monitor.IsAgentRunning(log) {
+				log.Info("Агент не запущен. Запуск...")
+				monitor.LoadAgent(log)
+			}
+			mon := monitor.NewMonitor(conf, cfgManager, log)
+			mon.Start(modeRun, nil) // Канал started не нужен в данном контексте
 		}
-		log.Line()
 
-		if !monitor.IsAgentRunning(log) {
-			log.Info("Агент не запущен. Запуск...")
-			monitor.LoadAgent(log)
+		if err := bgManager.Run("--background", task); err != nil {
+			log.Error(fmt.Sprintf("Не удалось запустить фоновый процесс: %v", err))
 		}
-		// Запускаем основную задачу мониторинга в обычном режиме
-		log.Info("Запускаем основную задачу мониторинга в обычном режиме...")
-		background.Run(log, conf, cfgManager, modeRun) // Запускаем основную задачу мониторинга
-
-		// После завершения задачи удаляем PID файл
-		defer func() {
-			_ = os.Remove(paths.PIDBackgoundPath())
-		}()
 		return
 	}
 
-	// --- Логика GUI Агента ---
+	// --- Запуск GUI Агента ---
 	if *guiAgentFlag {
-		log.Line()
-		log.Info("Запускаем GUI агента (иконка в трее)...")
-		// Создаем lock-файл, так как этот процесс теперь главный для GUI.
-		_ = os.WriteFile(paths.GUILockPath(), []byte(strconv.Itoa(os.Getpid())), 0644)
-		// Удаляем lock-файл при выходе
-		defer func() {
-			_ = os.Remove(paths.GUILockPath())
-		}()
-
-		// Запускаем фоновый процесс, если он еще не запущен
-		if !background.IsRunning(log) {
-			log.Info("Запускаем фоновый процесс мониторинга батареи...")
-			background.LaunchDetached("--background", log)
-		} else {
-			log.Info("Фоновый процесс уже запущен.")
+		task := func() {
+			// Запускаем фоновый процесс мониторинга, если он еще не запущен
+			if !bgManager.IsRunning("--background") {
+				log.Info("Запускаем фоновый процесс мониторинга батареи...")
+				bgManager.LaunchDetached("--background")
+			} else {
+				log.Info("Фоновый процесс мониторинга уже запущен.")
+			}
+			log.Line()
+			// Запускаем блокирующий цикл GUI
+			trayApp := tray.New(log, conf, cfgManager, bgManager)
+			trayApp.Start()
 		}
-		log.Line()
-		// Запускаем блокирующий цикл GUI
-		tray.Start(log)
+
+		if err := bgManager.Run("--gui-agent", task); err != nil {
+			log.Error(fmt.Sprintf("Не удалось запустить GUI агент: %v", err))
+		}
 		return
 	}
 
-	// --- Логика Лаунчера (запуск без флагов) ---
-	RunGUIAgent(log, conf, cfgManager, modeRun)
-}
-
-func RunGUIAgent(log *logger.Logger, cfg *config.Config, cfgManager *config.Manager, mode string) {
+	// --- Запуск Лаунчера (запуск без флагов) ---
 	log.Line()
 	log.Info("Запускаем приложение (режим лаунчера)...")
-	if background.IsGUIRunning(log) {
+	if bgManager.IsRunning("--gui-agent") {
 		log.Info("Приложение уже запущено. Выход.")
 		return
 	}
 
 	log.Info("Запускаем GUI агента...")
-	background.LaunchDetached("--gui-agent", log)
+	bgManager.LaunchDetached("--gui-agent")
 	log.Info("Приложение успешно запущено в фоновом режиме. Лаунчер завершает работу.")
 	log.Line()
 }

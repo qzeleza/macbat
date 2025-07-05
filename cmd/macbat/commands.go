@@ -218,9 +218,15 @@ func createPlistFile(binPath string, log *logger.Logger, cfg *config.Config) err
 func Uninstall(log *logger.Logger, cfg *config.Config) error {
 	log.Info("Начало удаления приложения")
 
+	// Создаем менеджер фоновых процессов для их завершения
+	bgManager := background.New(log)
+
 	// Завершаем все запущенные процессы
-	background.Kill(log, "--background")
-	background.Kill(log, "--gui-agent")
+	log.Info("Завершение фонового процесса...")
+	bgManager.Kill("--background")
+	log.Info("Завершение GUI-агента...")
+	bgManager.Kill("--gui-agent")
+
 	// Получаем путь к директории с бинарником перед удалением
 	binDir := paths.BinaryPath()
 

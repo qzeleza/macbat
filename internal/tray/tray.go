@@ -19,29 +19,64 @@ import (
 	"github.com/getlantern/systray"
 )
 
-var (
-	log      *logger.Logger
-	updateMu sync.Mutex // защита от параллельного вызова
-)
+// Tray управляет иконкой и меню в системном трее.
+// Содержит всю логику, связанную с GUI-агентом.
+// @property log - логгер для записи событий.
+// @property updateMu - мьютекс для безопасного обновления меню из разных горутин.
+// @property mChargeMode - элемент меню, отображающий режим заряда.
+// @property mCurrent - элемент меню, отображающий текущий заряд.
+// @property mMin - элемент меню для минимального порога.
+// @property mMax - элемент меню для максимального порога.
+// @property mCycles - элемент меню для количества циклов заряда.
+// @property mHealth - элемент меню для здоровья батареи.
+// @property cfgManager - менеджер конфигурации.
+// @property conf - текущая конфигурация.
+type Tray struct {
+	log         *logger.Logger
+	bgManager   *background.Manager
+	updateMu    sync.Mutex
+	mChargeMode *systray.MenuItem
+	mCurrent    *systray.MenuItem
+	mMin        *systray.MenuItem
+	mMax        *systray.MenuItem
+	mCycles     *systray.MenuItem
+	mHealth     *systray.MenuItem
+	cfgManager  *config.Manager
+	conf        *config.Config
+}
+
+// New создает новый экземпляр Tray.
+// @param appLog - логгер для записи событий.
+// @param cfg - текущая конфигурация.
+// @param cfgManager - менеджер конфигурации.
+// @param bgManager - менеджер фоновых процессов.
+// @return *Tray - новый экземпляр Tray.
+func New(appLog *logger.Logger, cfg *config.Config, cfgManager *config.Manager, bgManager *background.Manager) *Tray {
+	return &Tray{
+		log:        appLog,
+		conf:       cfg,
+		cfgManager: cfgManager,
+		bgManager:  bgManager,
+	}
+}
 
 // Start запускает GUI-агент в системном трее.
-func Start(appLog *logger.Logger) {
-	log = appLog
-	systray.Run(onReady, onExit)
+func (t *Tray) Start() {
+	systray.Run(t.onReady, t.onExit)
 }
 
 // onExit будет вызван при выходе из systray.
-func onExit() {
-	log.Info("Выход из приложения systray.")
+func (t *Tray) onExit() {
+	t.log.Info("Выход из приложения systray.")
 }
 
-func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode *systray.MenuItem, conf *config.Config) {
-	updateMu.Lock()
-	defer updateMu.Unlock()
+func (t *Tray) updateMenu() {
+	t.updateMu.Lock()
+	defer t.updateMu.Unlock()
 
 	info, err := battery.GetBatteryInfo()
 	if err != nil {
-		mCurrent.SetTitle("Ошибка получения данных")
+		t.mCurrent.SetTitle("Ошибка получения данных")
 		return
 	}
 
@@ -70,30 +105,26 @@ func updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode *systray.Men
 
 	// Обновляем заголовок с иконкой батареи
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
-	mCurrent.SetTitle(fmt.Sprintf("%-*s %s %4d%%", maxLength, labels[0], icon, info.CurrentCapacity)) // Текущий заряд
+	t.mCurrent.SetTitle(fmt.Sprintf("%-*s %s %4d%%", maxLength, labels[0], icon, info.CurrentCapacity)) // Текущий заряд
 
 	// Получаем пороги из конфигурации
-	minThreshold := 21 // Значение по умолчанию
-	maxThreshold := 81 // Значение по умолчанию
-	if conf != nil {
-		minThreshold = conf.MinThreshold
-		maxThreshold = conf.MaxThreshold
-	}
+	minThreshold := t.conf.MinThreshold
+	maxThreshold := t.conf.MaxThreshold
 
 	chargeIcon := ""
 	if info.IsCharging {
 		chargeIcon = "⚡"
 	}
 	// Обновляем информацию в меню с использованием динамического отступа
-	mChargeMode.SetTitle(fmt.Sprintf("%-21s %s %s", labels[5], chargeModeStr, chargeIcon)) // Режим заряда
+	t.mChargeMode.SetTitle(fmt.Sprintf("%-21s %s %s", labels[5], chargeModeStr, chargeIcon)) // Режим заряда
 
-	mMin.SetTitle(fmt.Sprintf("%-21s       %4d%%", labels[1], minThreshold)) // Мин. порог
-	mMax.SetTitle(fmt.Sprintf("%-21s       %4d%%", labels[2], maxThreshold)) // Макс. порог
+	t.mMin.SetTitle(fmt.Sprintf("%-21s       %4d%%", labels[1], minThreshold)) // Мин. порог
+	t.mMax.SetTitle(fmt.Sprintf("%-21s       %4d%%", labels[2], maxThreshold)) // Макс. порог
 
-	mCycles.SetTitle(fmt.Sprintf("%-22s    %4d", labels[3], info.CycleCount))   // Циклов заряда
-	mHealth.SetTitle(fmt.Sprintf("%-20s %4d%%", labels[4], info.HealthPercent)) // Здоровье батареи
+	t.mCycles.SetTitle(fmt.Sprintf("%-22s    %4d", labels[3], info.CycleCount))   // Циклов заряда
+	t.mHealth.SetTitle(fmt.Sprintf("%-20s %4d%%", labels[4], info.HealthPercent)) // Здоровье батареи
 
-	log.Info("Данные меню успешно обновлены.")
+	t.log.Info("Данные меню успешно обновлены.")
 }
 
 // getBatteryIcon возвращает иконку батареи в зависимости от уровня заряда
@@ -123,7 +154,7 @@ func getBatteryIcon(percent int, isCharging bool) string {
 }
 
 // onReady инициализирует иконку в трее
-func onReady() {
+func (t *Tray) onReady() {
 	iconData := getAppIconFromFile()
 	// Используем цветную иконку, а не шаблонную (template), чтобы macOS не перекрашивал её.
 	systray.SetTitle("👀")
@@ -132,53 +163,57 @@ func onReady() {
 
 	systray.AddSeparator()
 
-	mChargeMode := systray.AddMenuItem("Режим заряда: ...", "Показывает текущий режим заряда")
-	// mChargeMode.Disable()
+	t.mChargeMode = systray.AddMenuItem("Режим заряда: ...", "Показывает текущий режим заряда")
 
 	systray.AddSeparator()
 
-	mCurrent := systray.AddMenuItem("Текущий заряд: --%", "Текущий уровень заряда батареи")
-	// mCurrent.Disable()
+	t.mCurrent = systray.AddMenuItem("Текущий заряд: --%", "Текущий уровень заряда батареи")
+
 	systray.AddSeparator()
 
-	mMin := systray.AddMenuItem("Мин. порог: --%", "Минимальный порог заряда батареи, при достижении которого будет запущен режим разрядки")
-	// mMin.Disable()
+	t.mMin = systray.AddMenuItem("Мин. порог: --%", "Минимальный порог заряда батареи, при достижении которого будет запущен режим разрядки")
 
-	mMax := systray.AddMenuItem("Макс. порог: --%", "Максимальный порог заряда батареи, при достижении которого будет запущен режим зарядки")
-	// mMax.Disable()
+	t.mMax = systray.AddMenuItem("Макс. порог: --%", "Максимальный порог заряда батареи, при достижении которого будет запущен режим зарядки")
+
 	systray.AddSeparator()
 
-	mHealth := systray.AddMenuItem("Здоровье батареи: --%", "Здоровье батареи, показывает степень износа батареи")
-	// mHealth.Disable()
+	t.mHealth = systray.AddMenuItem("Здоровье батареи: --%", "Здоровье батареи, показывает степень износа батареи")
 
-	mCycles := systray.AddMenuItem("Циклов заряда: --", "Количество циклов заряда батареи")
-	// mCycles.Disable()
+	t.mCycles = systray.AddMenuItem("Циклов заряда: --", "Количество циклов заряда батареи")
 
 	systray.AddSeparator()
 
 	mQuit := systray.AddMenuItem("Выход", "Завершить работу приложения")
 
-	// Создаем логгер для получения конфигурации
-	log := logger.New(paths.LogPath(), 100, true, false)
+	// Создаем менеджер конфигурации и загружаем её
+	var err error
+	t.cfgManager, err = config.New(t.log, paths.ConfigPath())
+	if err != nil {
+		t.log.Error("Не удалось создать менеджер конфигурации: " + err.Error())
+		dlgs.Error("Критическая ошибка", "Не удалось создать менеджер конфигурации.")
+		systray.Quit()
+		return
+	}
 
-	// Создаем менеджер конфигурации
-	// Загружаем конфигурацию для отображения порогов
-	cfgManager, _ := config.New(log, paths.ConfigPath())
-	conf, _ := cfgManager.Load()
+	t.conf, err = t.cfgManager.Load()
+	if err != nil {
+		t.log.Error("Не удалось загрузить конфигурацию: " + err.Error())
+		dlgs.Error("Критическая ошибка", "Не удалось загрузить конфигурацию.")
+		systray.Quit()
+		return
+	}
 
-	// Переносим первое обновление меню на короткую задержку,
-	// чтобы гарантировать завершение инициализации GUI и избежать блокировки.
+	// Запускаем периодическое обновление меню
 	go func() {
+		// Первое обновление с небольшой задержкой для инициализации GUI
 		time.Sleep(100 * time.Millisecond)
-		updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, conf)
-	}()
+		t.updateMenu()
 
-	// Запускаем тикер для обновления меню каждые 30 секунд
-	go func() {
+		// Последующие обновления по тикеру
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, conf)
+			t.updateMenu()
 		}
 	}()
 
@@ -188,32 +223,32 @@ func onReady() {
 			select {
 
 			// Нажатие на "Текущий заряд"
-			case <-mCurrent.ClickedCh:
+			case <-t.mCurrent.ClickedCh:
 				dlgs.Warning("Внимание", "Текущий заряд батареи отображает процент оставшейся ёмкости относительно полной. Следите за этим показателем, чтобы не допускать глубокого разряда или перезаряда аккумулятора.\nРекомендуемые значения: от 20% до 80%.")
 
 			// Нажатие на "Режим заряда"
-			case <-mChargeMode.ClickedCh:
+			case <-t.mChargeMode.ClickedCh:
 				dlgs.Warning("Внимание", "Режим заряда показывает, заряжается ли сейчас аккумулятор или разряжается. При подключении к сети будет отображаться 'Зарядка', иначе — 'Разрядка'.")
 
 			// Нажатие на "Здоровье батареи"
-			case <-mHealth.ClickedCh:
+			case <-t.mHealth.ClickedCh:
 				dlgs.Warning("Внимание", "Этот показатель отражает текущее здоровье батареи — чем ниже, тем выше износ аккумулятора. Снижение ниже 80% обычно означает заметную деградацию ёмкости. Для поддержания ресурса используйте аккуратные циклы заряда.")
 
 			// Нажатие на "Циклов заряда"
-			case <-mCycles.ClickedCh:
+			case <-t.mCycles.ClickedCh:
 				dlgs.Warning("Внимание", "Количество циклов — это суммарное число полных разрядов/зарядов батареи. Большинство современных аккумуляторов рассчитаны примерно на 1000 циклов до существенного снижения ёмкости.")
 
 			// Нажатие на "Мин. порог"
-			case <-mMin.ClickedCh:
-				handleThresholdChange(cfgManager, conf, log, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, "min")
+			case <-t.mMin.ClickedCh:
+				t.handleThresholdChange("min")
 
 			// Нажатие на "Макс. порог"
-			case <-mMax.ClickedCh:
-				handleThresholdChange(cfgManager, conf, log, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, "max")
+			case <-t.mMax.ClickedCh:
+				t.handleThresholdChange("max")
 
 			// Нажатие на "Выход"
 			case <-mQuit.ClickedCh:
-				background.Kill(log, "--background")
+				t.bgManager.Kill("--background")
 				systray.Quit()
 				return
 			}
@@ -222,27 +257,24 @@ func onReady() {
 }
 
 // handleThresholdChange обрабатывает логику изменения порогов.
-// @param cfgManager - менеджер конфигурации для сохранения.
-// @param conf - текущая конфигурация.
-// @param menuItems - все элементы меню для обновления.
 // @param mode - какой порог меняем ("min" или "max").
-func handleThresholdChange(cfgManager *config.Manager, conf *config.Config, log *logger.Logger, mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode *systray.MenuItem, mode string) {
+func (t *Tray) handleThresholdChange(mode string) {
 	var title, prompt, currentValStr string
 	var currentVal int
 
-	log.Line()
+	t.log.Line()
 
 	sunMessage := "При достижении этого порога будет показано системное уведомление."
 	if mode == "min" {
 		title = "Минимальный порог"
 		prompt = "Введите новое значение минимального порога (0-100).\n" + sunMessage
-		currentVal = conf.MinThreshold
+		currentVal = t.conf.MinThreshold
 	} else {
 		title = "Максимальный порог"
 		prompt = "Введите новое значение максимального порога (0-100).\n" + sunMessage
-		currentVal = conf.MaxThreshold
+		currentVal = t.conf.MaxThreshold
 	}
-	log.Info(fmt.Sprintf("Меняем %s...", strings.ToLower(mode)))
+	t.log.Info(fmt.Sprintf("Меняем %s...", strings.ToLower(mode)))
 	currentValStr = strconv.Itoa(currentVal)
 
 	newValStr, ok, err := dlgs.Entry(title, prompt, currentValStr)
@@ -251,44 +283,44 @@ func handleThresholdChange(cfgManager *config.Manager, conf *config.Config, log 
 		return
 	}
 	if !ok {
-		log.Debug("Пользователь нажал 'Отмена'")
+		t.log.Debug("Пользователь нажал 'Отмена'")
 		// Пользователь нажал "Отмена"
 		return
 	}
 
 	newVal, err := strconv.Atoi(newValStr)
 	if err != nil {
-		log.Debug("Ошибка ввода, введено не целое число.")
+		t.log.Debug("Ошибка ввода, введено не целое число.")
 		dlgs.Error("Ошибка ввода", "Пожалуйста, введите целое число.")
 		return
 	}
 
 	// Валидация введенного значения
 	if mode == "min" {
-		if newVal < 0 || newVal >= conf.MaxThreshold {
-			log.Debug(fmt.Sprintf("Ошибка значения, значение должно быть между 0 и %d.", conf.MaxThreshold-1))
-			dlgs.Error("Ошибка значения", fmt.Sprintf("Значение должно быть между 0 и %d.", conf.MaxThreshold-1))
+		if newVal < 0 || newVal >= t.conf.MaxThreshold {
+			t.log.Debug(fmt.Sprintf("Ошибка значения, значение должно быть между 0 и %d.", t.conf.MaxThreshold-1))
+			dlgs.Error("Ошибка значения", fmt.Sprintf("Значение должно быть между 0 и %d.", t.conf.MaxThreshold-1))
 			return
 		}
-		conf.MinThreshold = newVal
+		t.conf.MinThreshold = newVal
 	} else { // max
-		if newVal <= conf.MinThreshold || newVal > 100 {
-			log.Debug(fmt.Sprintf("Ошибка значения, значение должно быть между %d и 100.", conf.MinThreshold+1))
-			dlgs.Error("Ошибка значения", fmt.Sprintf("Значение должно быть между %d и 100.", conf.MinThreshold+1))
+		if newVal <= t.conf.MinThreshold || newVal > 100 {
+			t.log.Debug(fmt.Sprintf("Ошибка значения, значение должно быть между %d и 100.", t.conf.MinThreshold+1))
+			dlgs.Error("Ошибка значения", fmt.Sprintf("Значение должно быть между %d и 100.", t.conf.MinThreshold+1))
 			return
 		}
-		conf.MaxThreshold = newVal
+		t.conf.MaxThreshold = newVal
 	}
 
-	log.Info(fmt.Sprintf("%s установлен в %d.", mode, newVal))
+	t.log.Info(fmt.Sprintf("%s установлен в %d.", mode, newVal))
 
 	// Сохраняем новую конфигурацию
-	if err := cfgManager.Save(conf); err != nil {
-		log.Error("Ошибка сохранения конфигурации: " + err.Error())
+	if err := t.cfgManager.Save(t.conf); err != nil {
+		t.log.Error("Ошибка сохранения конфигурации: " + err.Error())
 		dlgs.Error("Ошибка сохранения", "Не удалось сохранить новую конфигурацию: "+err.Error())
 	} else {
 		// Обновляем меню немедленно, чтобы показать изменения
-		updateMenu(mCurrent, mMin, mMax, mCycles, mHealth, mChargeMode, conf)
+		t.updateMenu()
 	}
 }
 

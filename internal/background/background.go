@@ -1,212 +1,269 @@
+/**
+ * @file background.go
+ * @brief Управление фоновыми процессами и их жизненным циклом.
+ *
+ * Этот пакет предоставляет инструменты для запуска, остановки и проверки состояния
+ * фоновых процессов приложения, таких как мониторинг батареи или GUI-агент.
+ * Он использует lock-файлы для предотвращения одновременного запуска нескольких
+ * экземпляров одного и того же процесса.
+ *
+ * @author Zeleza
+ * @date 2025-07-20
+ */
+
 package background
 
 import (
 	"fmt"
-	"macbat/internal/config"
-	"macbat/internal/logger"
-	"macbat/internal/monitor"
-	"macbat/internal/paths"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
+
+	"macbat/internal/logger"
+	"macbat/internal/paths"
 )
 
 //================================================================================
-// ЭКСПОРТИРУЕМЫЕ ФУНКЦИИ
+// СТРУКТУРЫ ДАННЫХ
 //================================================================================
 
-// IsGUIRunning проверяет, запущен ли GUI процесс, по lock-файлу.
-func IsGUIRunning(log *logger.Logger) bool {
-	lockFile := paths.GUILockPath()
-	pidBytes, err := os.ReadFile(lockFile)
-	if err != nil {
-		return false // Файл не найден, GUI не запущен.
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
-	if err != nil {
-		log.Info(fmt.Sprintf("Поврежденный lock-файл GUI, удаляем: %s", lockFile))
-		_ = os.Remove(lockFile) // Поврежденный файл, удаляем.
-		return false
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		log.Info(fmt.Sprintf("Процесс GUI не найден, удаляем устаревший lock-файл: %s", lockFile))
-		_ = os.Remove(lockFile) // Процесс не найден, устаревший файл.
-		return false
-	}
-	// Сигнал 0 проверяет существование процесса.
-	if err = process.Signal(syscall.Signal(0)); err == nil {
-		return true // Процесс существует.
-	}
-	log.Info(fmt.Sprintf("Процесс GUI не отвечает, удаляем устаревший lock-файл: %s", lockFile))
-	_ = os.Remove(lockFile) // Процесс не существует, устаревший файл.
-	return false
+// Manager управляет фоновыми процессами приложения.
+// @property log - логгер для записи событий.
+type Manager struct {
+	log      *logger.Logger // Логгер для вывода сообщений.
+	stopChan chan struct{}   // Канал для graceful shutdown.
 }
 
-// LaunchDetached запускает копию приложения с указанным флагом в отсоединенном режиме.
-func LaunchDetached(flag string, log *logger.Logger) {
-	log.Info(fmt.Sprintf("Запуск отсоединенного процесса с флагом: %s", flag))
+// New создает новый экземпляр Manager.
+//
+// @param log *logger.Logger - логгер для записи событий.
+// @return *Manager - новый экземпляр Manager.
+func New(log *logger.Logger) *Manager {
+	return &Manager{
+		log:      log,
+		stopChan: make(chan struct{}),
+	}
+}
 
-	cmd := exec.Command(paths.BinaryPath(), flag)
-	cmd.Env = os.Environ()
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+//================================================================================
+// ОСНОВНЫЕ МЕТОДЫ
+//================================================================================
+
+// LaunchDetached запускает новый экземпляр приложения в отсоединенном режиме.
+//
+// @param processType Строковый флаг, указывающий, какой процесс запустить (например, "--background").
+func (m *Manager) LaunchDetached(processType string) {
+	binPath := paths.BinaryPath()
+	if binPath == paths.AppName {
+		// Это означает, что os.Executable() вернул ошибку, и было возвращено имя по умолчанию.
+		m.log.Error(fmt.Sprintf("Не удалось получить полный путь к исполняемому файлу, используется '%s'. Убедитесь, что он находится в PATH.", binPath))
+	}
+
+	cmd := exec.Command(binPath, processType)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Отсоединяем от текущей сессии
 
 	if err := cmd.Start(); err != nil {
-		log.Fatal(fmt.Sprintf("Не удалось запустить процесс с флагом %s: %v", flag, err))
+		m.log.Error(fmt.Sprintf("Не удалось запустить отсоединенный процесс '%s': %v", processType, err))
+		return
 	}
-	log.Info(fmt.Sprintf("Процесс с флагом %s успешно запущен с PID: %d", flag, cmd.Process.Pid))
+
+	m.log.Info(fmt.Sprintf("Процесс '%s' успешно запущен в фоновом режиме с PID %d.", processType, cmd.Process.Pid))
+	// Важно: не ждем завершения процесса, чтобы родитель мог завершиться.
+	_ = cmd.Process.Release()
 }
 
-// Run - это основная логика приложения, которая работает в фоне.
-func Run(log *logger.Logger, cfg *config.Config, cfgManager *config.Manager, mode string) {
-	log.Info("Фоновый процесс проверки заряда батареи начал работу.")
+// Run выполняет задачу, удерживая блокировку для указанного типа процесса.
+// Этот метод является блокирующим и завершится только после выполнения переданной задачи.
+//
+// @param processType Строковый идентификатор процесса (например, "--background").
+// @param task Функция, содержащая основную логику процесса.
+// @return Ошибка, если процесс уже запущен или не удалось создать блокировку.
+func (m *Manager) Run(processType string, task func()) error {
+	// 1. Попытка заблокировать lock-файл.
+	lockFile, err := m.lock(processType)
+	if err != nil {
+		return fmt.Errorf("процесс '%s' уже запущен или произошла ошибка блокировки: %w", processType, err)
+	}
+	// Гарантируем разблокировку и очистку при выходе из функции.
+	defer m.unlock(lockFile)
 
-	// Настраиваем канал для обработки сигналов завершения.
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// 2. Запись PID.
+	if err := m.writePID(processType); err != nil {
+		// Не фатально, но стоит залогировать.
+		m.log.Info(fmt.Sprintf("Не удалось записать PID-файл для '%s': %v", processType, err))
+	}
+	// Гарантируем удаление PID-файла при выходе.
+	defer m.removePID(processType)
 
-	// Создаем и запускаем монитор.
-	appMonitor := monitor.NewMonitor(cfg, cfgManager, log)
+	m.log.Info(fmt.Sprintf("Процесс '%s' успешно запущен и заблокирован.", processType))
 
-	monitorStarted := make(chan struct{})
+	// 3. Установка обработчика сигналов для корректного завершения.
+	m.handleSignals(processType)
 
+	// 4. Выполнение основной задачи, переданной в параметре.
 	go func() {
-		close(monitorStarted) // Сообщаем, что монитор запускается.
-		appMonitor.Start(mode)
+		defer func() {
+			// После завершения задачи отправляем сигнал в stopChan, если он еще не закрыт.
+			// Используем select для неблокирующей проверки, чтобы избежать паники при двойном закрытии.
+			select {
+			case <-m.stopChan:
+				// Канал уже закрыт, ничего не делаем.
+			default:
+				close(m.stopChan)
+			}
+		}()
+		if task != nil {
+			task()
+		}
 	}()
 
-	// Ждем, пока монитор действительно начнет работу.
-	<-monitorStarted
-	log.Info("Монитор успешно запущен (appMonitor.Start).")
+	// Ожидаем сигнала о завершении (от задачи или от обработчика сигналов).
+	<-m.stopChan
+	m.log.Info(fmt.Sprintf("Задача процесса '%s' завершена. Снятие блокировки.", processType))
 
-	sig := <-sigChan
-	log.Info(fmt.Sprintf("Получен сигнал %v, завершаю работу...", sig))
-
-	// Корректно останавливаем монитор.
-	appMonitor.Stop()
-
-	// Даем время на завершение всех горутин.
-	time.Sleep(500 * time.Millisecond)
-}
-
-// IsRunning проверяет, запущен ли фоновый процесс, по PID-файлу.
-func IsRunning(log *logger.Logger) bool {
-	pidPath := paths.PIDBackgoundPath()
-	pidBytes, err := os.ReadFile(pidPath)
-	if err != nil {
-		// Если файл не читается, считаем, что процесс не запущен.
-		return false
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
-	if err != nil {
-		log.Info(fmt.Sprintf("Поврежденный PID-файл, удаляем: %s", pidPath))
-		_ = os.Remove(pidPath)
-		return false
-	}
-
-	// Проверяем, существует ли процесс с таким PID.
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		log.Info(fmt.Sprintf("Процесс не найден, удаляем устаревший PID-файл: %s", pidPath))
-		_ = os.Remove(pidPath)
-		return false
-	}
-
-	// Отправка сигнала 0 - это стандартный способ проверить существование процесса в Unix-системах.
-	err = process.Signal(syscall.Signal(0))
-	if err != nil {
-		log.Info(fmt.Sprintf("Процесс не отвечает, удаляем устаревший PID-файл: %s", pidPath))
-		_ = os.Remove(pidPath)
-	}
-	return err == nil
-}
-
-// WritePID записывает PID текущего процесса в файл.
-func WritePID(log *logger.Logger) error {
-	pidPath := paths.PIDBackgoundPath()
-	pid := os.Getpid()
-	log.Info(fmt.Sprintf("Запись PID %d в файл: %s", pid, pidPath))
-
-	// Создаем директорию, если она не существует.
-	dir := filepath.Dir(pidPath)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("не удалось создать директорию для PID файла: %w", err)
-		}
-	}
-
-	// Записываем PID в файл.
-	err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
-	if err != nil {
-		return fmt.Errorf("не удалось записать в PID файл: %w", err)
-	}
 	return nil
 }
 
-// Kill находит и завершает указанный процесс (background или gui).
-// В качестве аргумента принимает логгер и тип процесса: "background" или "gui".
-func Kill(log *logger.Logger, processType string) {
-	var pidPath string
+// IsRunning проверяет, запущен ли процесс указанного типа, путем проверки lock-файла.
+//
+// @param processType Строковый идентификатор процесса (например, "--background").
+// @return true, если процесс запущен, иначе false.
+func (m *Manager) IsRunning(processType string) bool {
+	lockPath := paths.LockPath(processType)
+	file, err := os.Open(lockPath)
+	if err != nil {
+		return false // Файла нет, значит, процесс не запущен.
+	}
+	defer file.Close()
 
-	// Определяем путь к PID/Lock файлу в зависимости от типа процесса.
-	switch processType {
-	case "--background":
-		pidPath = paths.PIDBackgoundPath()
-	case "--gui-agent":
-		pidPath = paths.GUILockPath()
-	default:
-		log.Error(fmt.Sprintf("Неизвестный тип процесса для завершения: %s", processType))
-		return
+	// Пытаемся заблокировать файл. Если удалось (err == nil), значит, он не заблокирован другим процессом.
+	// В этом случае процесс не запущен, и мы тут же снимаем блокировку.
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		return false
 	}
 
-	log.Info(fmt.Sprintf("Попытка завершить процесс типа '%s', используя PID файл: %s", processType, pidPath))
+	return true
+}
 
-	// Читаем PID из файла.
+// Kill отправляет сигнал завершения процессу по его PID из PID-файла.
+//
+// @param processType Строковый идентификатор процесса.
+// @return Ошибка, если не удалось прочитать PID или отправить сигнал.
+func (m *Manager) Kill(processType string) error {
+	pidPath := paths.PIDPath(processType)
 	pidBytes, err := os.ReadFile(pidPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			log.Info(fmt.Sprintf("PID файл для процесса '%s' не найден. Процесс, вероятно, не запущен.", processType))
-		} else {
-			log.Error(fmt.Sprintf("Не удалось прочитать PID файл для процесса '%s': %v", processType, err))
-		}
-		return
+		return fmt.Errorf("не удалось прочитать PID-файл для '%s': %w", processType, err)
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
 	if err != nil {
-		log.Error(fmt.Sprintf("Неверный формат PID в файле для процесса '%s': %v", processType, err))
-		_ = os.Remove(pidPath)
-		return
+		return fmt.Errorf("некорректный PID в файле '%s': %w", pidPath, err)
 	}
 
-	// Находим процесс по PID.
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		log.Error(fmt.Sprintf("Не удалось найти процесс '%s' с PID %d: %v", processType, pid, err))
-		_ = os.Remove(pidPath)
+		// Процесс может не существовать, если он уже завершился.
+		// Это не всегда ошибка, но мы возвращаем ее для информации.
+		return fmt.Errorf("не удалось найти процесс с PID %d: %w", pid, err)
+	}
+
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		// Если процесс уже завершен, os.FindProcess его находит, но Signal возвращает ошибку.
+		// Мы можем проверить ошибку, чтобы не считать это сбоем.
+		if strings.Contains(err.Error(), "process already finished") {
+			m.log.Info(fmt.Sprintf("Процесс '%s' (PID: %d) уже был завершен.", processType, pid))
+			// Очищаем файлы, так как процесс мертв
+			m.removePID(processType)
+			lockPath := paths.LockPath(processType)
+			_ = os.Remove(lockPath)
+			return nil
+		}
+		return fmt.Errorf("не удалось отправить сигнал завершения процессу с PID %d: %w", pid, err)
+	}
+
+	m.log.Info(fmt.Sprintf("Сигнал завершения отправлен процессу '%s' (PID: %d).", processType, pid))
+	return nil
+}
+
+//================================================================================
+// ВНУТРЕННИЕ МЕТОДЫ
+//================================================================================
+
+// writePID записывает PID текущего процесса в файл.
+func (m *Manager) writePID(processType string) error {
+	pidPath := paths.PIDPath(processType)
+	pid := os.Getpid()
+	err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
+	if err != nil {
+		m.log.Error(fmt.Sprintf("Не удалось записать PID-файл в '%s': %v", pidPath, err))
+		return err
+	}
+	m.log.Info(fmt.Sprintf("PID %d записан в %s", pid, pidPath))
+	return nil
+}
+
+// removePID удаляет PID-файл.
+func (m *Manager) removePID(processType string) {
+	pidPath := paths.PIDPath(processType)
+	if err := os.Remove(pidPath); err != nil && !os.IsNotExist(err) {
+		m.log.Info(fmt.Sprintf("Не удалось удалить PID-файл '%s': %v", pidPath, err))
+	} else {
+		m.log.Info(fmt.Sprintf("PID-файл '%s' удален.", pidPath))
+	}
+}
+
+// lock пытается создать и заблокировать lock-файл.
+func (m *Manager) lock(processType string) (*os.File, error) {
+	lockPath := paths.LockPath(processType)
+	file, err := os.Create(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать lock-файл '%s': %w", lockPath, err)
+	}
+
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("не удалось заблокировать lock-файл '%s', возможно, процесс уже запущен: %w", lockPath, err)
+	}
+
+	return file, nil
+}
+
+// unlock снимает блокировку и удаляет lock-файл.
+func (m *Manager) unlock(file *os.File) {
+	if file == nil {
 		return
 	}
-
-	// Отправляем сигнал завершения.
-	log.Info(fmt.Sprintf("Отправка сигнала SIGTERM процессу '%s' с PID %d", processType, pid))
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		log.Error(fmt.Sprintf("Не удалось отправить сигнал SIGTERM процессу %d: %v", pid, err))
-	} else {
-		log.Info(fmt.Sprintf("Сигнал SIGTERM успешно отправлен процессу %d", pid))
+	lockPath := file.Name() // Получаем путь из самого файла
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_UN); err != nil {
+		m.log.Error(fmt.Sprintf("Не удалось разблокировать lock-файл '%s': %v", lockPath, err))
 	}
-
-	// Удаляем PID файл после отправки сигнала.
-	if err := os.Remove(pidPath); err != nil {
-		log.Error(fmt.Sprintf("Не удалось удалить PID файл для процесса '%s': %v", processType, err))
-	} else {
-		log.Info(fmt.Sprintf("PID файл для процесса '%s' успешно удален.", processType))
+	if err := file.Close(); err != nil {
+		m.log.Error(fmt.Sprintf("Не удалось закрыть lock-файл '%s': %v", lockPath, err))
 	}
+	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+		m.log.Error(fmt.Sprintf("Не удалось удалить lock-файл '%s': %v", lockPath, err))
+	}
+}
+
+// handleSignals настраивает обработку системных сигналов для graceful shutdown.
+func (m *Manager) handleSignals(processType string) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigChan
+		m.log.Info(fmt.Sprintf("Получен сигнал '%v' для процесса '%s'. Завершение...", sig, processType))
+		// Используем select для неблокирующей проверки, чтобы избежать паники при двойном закрытии.
+		select {
+		case <-m.stopChan:
+			// Канал уже закрыт, ничего не делаем.
+		default:
+			close(m.stopChan)
+		}
+	}()
 }

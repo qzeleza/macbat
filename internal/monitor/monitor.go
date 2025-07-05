@@ -121,9 +121,11 @@ func NewMonitor(cfg *config.Config, cfgManager *config.Manager, logger *logger.L
 
 // Start запускает основной цикл работы монитора с поддержкой обновления конфигурации.
 // Этот метод является блокирующим и должен выполняться в главной горутине фонового процесса.
-//
+// 
+// @param mode Режим работы (например, "simulate").
+// @param started Канал для сигнала о том, что монитор успешно запущен.
 // @return Ничего.
-func (m *Monitor) Start(mode string) {
+func (m *Monitor) Start(mode string, started chan<- struct{}) {
 	m.notifier.Info("Запуск основного цикла монитора.")
 
 	// Создаем канал, по которому будем получать обновленную конфигурацию.
@@ -155,7 +157,12 @@ func (m *Monitor) Start(mode string) {
 
 	// Используем тикер для периодических проверок.
 	ticker := time.NewTicker(time.Duration(m.getCheckInterval()) * time.Second)
-	defer ticker.Stop() // Гарантируем освобождение ресурсов тикера при выходе.
+	defer ticker.Stop()
+
+	// Сигнализируем, что монитор запущен
+	if started != nil {
+		close(started)
+	} // Гарантируем освобождение ресурсов тикера при выходе.
 
 	m.notifier.Info(fmt.Sprintf(
 		"Мониторинг запущен. Текущий интервал проверки: %v секунд",

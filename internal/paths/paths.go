@@ -6,6 +6,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // AppName - это константа, определяющая имя приложения.
@@ -82,14 +83,20 @@ func AgentIdentifier() string {
 	return "com." + AppName + ".agent"
 }
 
-// PIDPath возвращает путь к файлу PID.
-// @return string - путь к macbat.pid
-func PIDBackgoundPath() string {
-	return "/tmp/" + AppName + ".pid"
+// PIDPath возвращает путь к файлу PID для указанного типа процесса.
+// @param processType - тип процесса (например, "--background" или "--gui-agent").
+// @return string - путь к PID-файлу.
+func PIDPath(processType string) string {
+	// Удаляем префиксы, чтобы имя файла было чище
+	cleanProcessType := strings.TrimPrefix(processType, "--")
+	return filepath.Join(os.TempDir(), AppName+"."+cleanProcessType+".pid")
 }
 
-// GUILockPath возвращает путь к файлу блокировки GUI.
-// @return string - путь к macbat.gui.lock
-func GUILockPath() string {
-	return "/tmp/" + AppName + ".gui.lock"
+// LockPath возвращает путь к файлу блокировки для указанного типа процесса.
+// @param processType - тип процесса (например, "--background" или "--gui-agent").
+// @return string - путь к lock-файлу.
+func LockPath(processType string) string {
+	// Удаляем префиксы, чтобы имя файла было чище
+	cleanProcessType := strings.TrimPrefix(processType, "--")
+	return filepath.Join(os.TempDir(), AppName+"."+cleanProcessType+".lock")
 }
