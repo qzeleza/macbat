@@ -1,5 +1,5 @@
 {
-  "min_threshold": 25,
+  "min_threshold": 78,
   "max_threshold": 81,
   "check_interval_charging": 60,
   "check_interval_discharging": 1326,

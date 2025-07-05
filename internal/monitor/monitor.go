@@ -252,6 +252,12 @@ func (m *Monitor) resetState(newChargingState bool) {
 // @param info Информация о батарее.
 func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo) {
 
+	// Отладочное сообщение для проверки порогов.
+	m.notifier.Debug(fmt.Sprintf(
+		"Проверка нижнего порога: Текущий заряд=%d%%, Мин. порог=%d%%",
+		info.CurrentCapacity, m.config.MinThreshold,
+	))
+
 	// Если уровень заряда выше порога, проверка пропускается.
 	if info.CurrentCapacity > m.config.MinThreshold {
 		return
@@ -284,6 +290,12 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 // @param now Текущее время.
 // @param info Информация о батарее.
 func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
+
+	// Отладочное сообщение для проверки порогов.
+	m.notifier.Debug(fmt.Sprintf(
+		"Проверка верхнего порога: Текущий заряд=%d%%, Макс. порог=%d%%",
+		info.CurrentCapacity, m.config.MaxThreshold,
+	))
 
 	// Если уровень заряда ниже порога, проверка пропускается.
 	if info.CurrentCapacity < m.config.MaxThreshold {

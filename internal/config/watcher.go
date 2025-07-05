@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"macbat/internal/logger"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 /**
@@ -71,7 +72,7 @@ func Watch(configPath string, updateChan chan<- *Config, log *logger.Logger) {
 	log.Info(fmt.Sprintf("Наблюдатель запущен для файла: %s", configPath))
 
 	// Блокируем горутину, чтобы она не завершилась.
-	// Так как эта функция сама должна быть запущена в горутине, 
+	// Так как эта функция сама должна быть запущена в горутине,
 	// она будет жить, пока жив основной процесс.
 	<-make(chan struct{})
 }

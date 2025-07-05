@@ -37,6 +37,7 @@ type Config struct {
 	LogFilePath                  string `json:"log_file_path"`              // Путь к файлу логов
 	LogRotationLines             int    `json:"log_rotation_lines"`         // Количество строк в файле логов
 	LogEnabled                   bool   `json:"log_enabled"`                // Включить логирование
+	RunAtLoad                    bool   `json:"run_at_load"`                // Запускать ли агент при входе в систему
 }
 
 // Manager инкапсулирует всю логику управления конфигурацией.
@@ -84,6 +85,7 @@ func Default() *Config {
 		CheckIntervalWhenCharging:    30,   // ИЗМЕНЕНИЕ: 30 секунд
 		CheckIntervalWhenDischarging: 1800, // ИЗМЕНЕНИЕ: 30 минут = 1800 секунд
 		LogEnabled:                   true,
+		RunAtLoad:                    true,
 		DebugEnabled:                 false,
 	}
 }
@@ -233,6 +235,11 @@ func (m *Manager) mergeWithDefaults(loaded *Config, presenceMap map[string]inter
 	if !keyExists("log_enabled") {
 		m.log.Debug(fmt.Sprintf("Поле 'log_enabled' отсутствует. Установлено значение по умолчанию: %t", defaultCfg.LogEnabled))
 		loaded.LogEnabled = defaultCfg.LogEnabled
+		changesMade = true
+	}
+	if !keyExists("run_at_load") {
+		m.log.Debug(fmt.Sprintf("Поле 'run_at_load' отсутствует. Установлено значение по умолчанию: %t", defaultCfg.RunAtLoad))
+		loaded.RunAtLoad = defaultCfg.RunAtLoad
 		changesMade = true
 	}
 

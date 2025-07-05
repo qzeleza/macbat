@@ -26,18 +26,28 @@ func BinaryPath() string {
 	return binPath
 }
 
+// AppSupportDir возвращает путь к директории поддержки приложения.
+// @return string - путь к директории поддержки
+func AppSupportDir() string {
+	// Для macOS стандартным местом является ~/Library/Application Support/
+	appSupportDir := filepath.Join(os.Getenv("HOME"), "Library", "Application Support", AppName)
+	_ = os.MkdirAll(appSupportDir, 0755)
+	return appSupportDir
+}
+
 // ConfigPath возвращает путь к файлу конфигурации.
-// Мы будем хранить config.json рядом с исполняемым файлом для портативности.
 // @return string - путь к config.json
 func ConfigPath() string {
-	// Получаем путь к исполняемому файлу
-	exePath, err := os.Executable()
-	if err != nil {
-		// В случае ошибки, возвращаем путь в домашней директории как запасной вариант
-		return filepath.Join(os.Getenv("HOME"), ".config", AppName, "config.json")
-	}
-	// Возвращаем путь к config.json в той же директории, что и бинарник
-	return filepath.Join(filepath.Dir(exePath), "config.json")
+	// Храним конфигурацию в директории поддержки приложения.
+	return filepath.Join(AppSupportDir(), "config.json")
+}
+
+// SymlinkPath возвращает предполагаемый путь для символической ссылки на бинарник.
+// Этот путь будет использоваться в plist-файле для стабильного запуска.
+// @return string - путь к символической ссылке
+func SymlinkPath() string {
+	// Храним симлинк в директории поддержки приложения для стабильности.
+	return filepath.Join(AppSupportDir(), AppName)
 }
 
 // LogDir возвращает путь к директории логов.

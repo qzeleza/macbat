@@ -116,18 +116,20 @@ func main() {
 	}
 
 	// --- Установка/удаление приложения ---
-	if *installFlag || !monitor.IsAppInstalled(log) {
+	// Устанавливаем, если приложение не установлено, или если флаг --install был передан явно.
+	if (!monitor.IsAppInstalled(log) && !*uninstallFlag) || *installFlag {
 		log.Line()
 		log.Info("Установка приложения...")
 		if err := Install(log, conf); err != nil {
 			log.Fatal(fmt.Sprintf("Ошибка во время установки: %v", err))
 		}
 		log.Info("Установка успешно завершена.")
-		// Если запрошена установка, то выходим
+		// Если была запрошена только установка, то выходим.
 		if *installFlag {
 			return
 		}
 	}
+
 	if *uninstallFlag {
 		log.Line()
 		log.Info("Запрошено удаление приложения...")
@@ -154,9 +156,14 @@ func main() {
 		// Если мы здесь, значит процесс уже отсоединен от терминала
 		log.Info("Запускаем основную задачу мониторинга в фоновом режиме...")
 		task := func() {
+			// В фоновом режиме агент должен быть уже запущен через launchd,
+			// но мы проверяем на всякий случай.
 			if !monitor.IsAgentRunning(log) {
-				log.Info("Агент не запущен. Запуск...")
-				monitor.LoadAgent(log)
+				log.Info("Агент не запущен. Попытка запуска...")
+				if _, err := monitor.LoadAgent(log); err != nil {
+					log.Error(fmt.Sprintf("Не удалось запустить агент: %v", err))
+					return // Выходим, если не удалось запустить
+				}
 			}
 			mon := monitor.NewMonitor(conf, cfgManager, log)
 			mon.Start(modeRun, nil) // Канал started не нужен в данном контексте
