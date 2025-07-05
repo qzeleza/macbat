@@ -76,7 +76,6 @@ import (
 	"macbat/internal/config"
 	"macbat/internal/dialog"
 	"macbat/internal/logger"
-	"macbat/internal/paths"
 )
 
 //================================================================================
@@ -128,73 +127,43 @@ func NewMonitor(cfg *config.Config, cfgManager *config.Manager, logger *logger.L
 func (m *Monitor) Start(mode string, started chan<- struct{}) {
 	m.notifier.Info("Запуск основного цикла монитора.")
 
-	// Создаем канал, по которому будем получать обновленную конфигурацию.
-	configUpdateChan := make(chan *config.Config)
-	// Запускаем наблюдателя за файлом в отдельной горутине.
-	go config.Watch(paths.ConfigPath(), configUpdateChan, m.notifier)
+	// Определяем, какой источник данных использовать: реальный или симулятор.
+	var getInfo func() (*battery.BatteryInfo, error)
+	if mode == "test" {
+		// TODO: Реализовать логику симулятора
+		m.notifier.Info("Режим симуляции пока не реализован. Используются реальные данные.")
+		getInfo = battery.GetBatteryInfo
+	} else {
+		m.notifier.Info("Режим работы: РЕАЛЬНЫЕ ДАННЫЕ.")
+		getInfo = battery.GetBatteryInfo
+	}
 
-	// Определяем источник данных о батарее (реальный или симулятор).
-	var provider batteryInfoProvider
-	// if mode == "test" {
-	// 	m.config.DebugEnabled = true // Включаем режим отладки
-	// 	m.notifier.Test("Режим работы: СИМУЛЯТОР.")
-	// 	simulator := simulator.NewBatterySimulator(
-	// 		m.notifier,                // Объект для отправки уведомлений
-	// 		23,                        // Начальный уровень заряда
-	// 		false,                     // Начальное состояние зарядки
-	// 		m.config.MinThreshold,     // Минимальный порог заряда
-	// 		m.config.MaxThreshold,     // Максимальный порог заряда
-	// 		m.config.MaxNotifications, // Максимальное количество уведомлений
-	// 	)
-	// 	provider = func() (*battery.BatteryInfo, error) {
-	// 		// Передаем симулятору обратную связь о количестве показанных уведомлений.
-	// 		return simulator.GetNextState(m.notificationsShown)
-	// 	}
-	// } else {
-	m.notifier.Info("Режим работы: РЕАЛЬНЫЕ ДАННЫЕ.")
-	provider = battery.GetBatteryInfo
-	// }
+	// Начальный интервал проверки.
+	initialInterval := time.Duration(m.getCheckInterval()) * time.Second
+	ticker := time.NewTicker(initialInterval)
+	m.notifier.Info(fmt.Sprintf("Мониторинг запущен. Текущий интервал проверки: %d секунд", m.getCheckInterval()))
 
-	// Используем тикер для периодических проверок.
-	ticker := time.NewTicker(time.Duration(m.getCheckInterval()) * time.Second)
-	defer ticker.Stop()
-
-	// Сигнализируем, что монитор запущен
+	// Сигнализируем, что монитор запущен.
 	if started != nil {
 		close(started)
-	} // Гарантируем освобождение ресурсов тикера при выходе.
-
-	m.notifier.Info(fmt.Sprintf(
-		"Мониторинг запущен. Текущий интервал проверки: %v секунд",
-		m.getCheckInterval(),
-	))
+	}
 
 	for {
-		// select позволяет нам ждать события от нескольких источников одновременно.
 		select {
-		// Событие 0: Получен сигнал остановки
-		case <-m.stopChan:
-			m.notifier.Info("Получен сигнал остановки монитора. Завершение работы.")
-			return
-
-		// Событие 1: Получили обновленную конфигурацию из канала.
-		case newCfg, ok := <-configUpdateChan:
-			if !ok {
-				m.notifier.Debug("Канал обновлений конфигурации был закрыт. Выход.")
-				return
-			}
-			m.applyNewConfig(newCfg, ticker)
-
-		// Событие 2: Сработал таймер для проверки состояния батареи.
-		case <-ticker.C:
-			currentInfo, err := provider()
+		case now := <-ticker.C:
+			info, err := getInfo()
 			if err != nil {
-				m.notifier.Error(fmt.Sprintf("Ошибка получения данных о батарее: %v.", err))
-				continue // Пропускаем проверку, ждем следующего тика.
+				m.notifier.Error(fmt.Sprintf("Ошибка получения информации о батарее: %v", err))
+				continue
 			}
-			m.Check(time.Now(), *currentInfo)
+			m.Check(now, *info)
 			// После проверки обновляем интервал тикера, т.к. режим заряда мог измениться.
 			ticker.Reset(time.Duration(m.getCheckInterval()) * time.Second)
+
+		case <-m.stopChan:
+			ticker.Stop()
+			m.notifier.Info("Монитор остановлен.")
+			return
 		}
 	}
 }
