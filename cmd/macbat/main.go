@@ -60,7 +60,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("macbat version: %s\ncommit: %s\nbuild date: %s\n", version.Version, version.CommitHash, version.BuildDate)
+		fmt.Printf("Версия macbat: %s\nХеш коммита: %s\nДата сборки: %s\n", version.Version, version.CommitHash, version.BuildDate)
 		return
 	}
 	if *configFlag {

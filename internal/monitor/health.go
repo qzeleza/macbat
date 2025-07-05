@@ -19,6 +19,7 @@ func IsAppInstalled(log *logger.Logger) bool {
 		return false
 	}
 
+	log.Line()
 	log.Info("Запуск проверки наличия установленных файлов...")
 
 	// Определяем задачи для проверки в виде карты.

@@ -19,7 +19,6 @@ import (
 // @return *appConfig.Config - конфигурация приложения
 // @return error - ошибка, если не удалось установить приложение
 func Install(log *logger.Logger, cfg *config.Config) error {
-	log.Info("Начало установки приложения")
 
 	// 1. Определяем пути
 	binPath := paths.BinaryPath()
@@ -31,7 +30,7 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 	// 	return fmt.Errorf("%s", mess)
 	// }
 
-	log.Debug(fmt.Sprintf("Целевой путь бинарника: %s", binPath))
+	// log.Debug(fmt.Sprintf("Целевой путь бинарника: %s", binPath))
 	// log.Debug(fmt.Sprintf("Текущий путь бинарника: %s", currentBin))
 
 	// Создаем директорию для логов
@@ -235,16 +234,6 @@ func Uninstall(log *logger.Logger, cfg *config.Config) error {
 		log.Info("Агент успешно выгружен")
 	}
 
-	// Удаляем файлы конфигурации
-	if err := removePlistFile(log); err != nil {
-		return err
-	}
-
-	// Удаляем бинарник
-	if err := removeBinary(log); err != nil {
-		return err
-	}
-
 	// Удаляем директорию из PATH
 	removePathFromEnvironment(binDir, log)
 
@@ -252,26 +241,6 @@ func Uninstall(log *logger.Logger, cfg *config.Config) error {
 	removeAllFiles(log)
 
 	log.Info("Удаление приложения завершено")
-	return nil
-}
-
-func removePlistFile(log *logger.Logger) error {
-	plistPath := paths.PlistPath()
-	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
-		mess := fmt.Sprintf("не удалось удалить файл %s: %v", plistPath, err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	return nil
-}
-
-func removeBinary(log *logger.Logger) error {
-	binPath := paths.BinaryPath()
-	if err := os.Remove(binPath); err != nil && !os.IsNotExist(err) {
-		mess := fmt.Sprintf("не удалось удалить бинарник %s: %v", binPath, err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
 	return nil
 }
 
