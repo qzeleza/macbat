@@ -21,6 +21,7 @@ func IsAppInstalled(log *logger.Logger) bool {
 
 	log.Line()
 	log.Info("Запуск проверки наличия установленных файлов...")
+	log.Line()
 
 	// Определяем задачи для проверки в виде карты.
 	// Каждому файлу соответствует свой список искомых строк.
@@ -218,11 +219,10 @@ func removeOldFiles(log *logger.Logger) error {
 		log.Debug(fmt.Sprintf("Удаление файла: %s", path))
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			log.Error(fmt.Sprintf("Не удалось удалить %s: %v", path, err))
-			// Продолжаем удаление других файлов
-		} else if err == nil {
-			log.Debug(fmt.Sprintf("Файл успешно удален: %s", path))
 		}
 	}
+	log.Line()
+	log.Debug(fmt.Sprintf("Файлы %v успешно удалены.", filesToRemove))
 	return nil
 }
 

@@ -6,6 +6,7 @@ package logger
 import (
 	"fmt"
 	"log"
+	"macbat/internal/paths"
 	"os"
 	"strings"
 	"sync"
@@ -38,6 +39,12 @@ func New(filePath string, maxLines int, logEnabled bool, debugEnabled bool) *Log
 
 	// Задаем начальное количество строк.
 	lines := 0
+
+	// Убеждаемся, что директория для логов существует.
+	err := paths.EnsureLogDir()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	return &Logger{
 		filePath:       filePath,

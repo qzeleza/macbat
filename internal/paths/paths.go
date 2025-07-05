@@ -48,9 +48,9 @@ func LogDir() string {
 	return logDir
 }
 
-// ensureLogDir создает директорию логов, если она не существует.
+// EnsureLogDir создает директорию логов, если она не существует.
 // @return error - ошибка, если не удалось создать директорию
-func ensureLogDir() error {
+func EnsureLogDir() error {
 	logDir := LogDir()
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
 		return os.MkdirAll(logDir, 0755)
@@ -61,7 +61,6 @@ func ensureLogDir() error {
 // LogPath возвращает путь к файлу логов.
 // @return string - путь к macbat.log
 func LogPath() string {
-	_ = ensureLogDir() // Игнорируем ошибку, так как это вызовется при каждой записи в лог
 	return filepath.Join(LogDir(), AppName+".log")
 }
 
@@ -74,7 +73,7 @@ func PlistPath() string {
 // ErrorLogPath возвращает путь к файлу ошибок.
 // @return string - путь к macbat.err
 func ErrorLogPath() string {
-	return "/tmp/" + AppName + ".err"
+	return filepath.Join(LogDir(), AppName+".err")
 }
 
 // AgentIdentifier возвращает идентификатор агента для launchd.
