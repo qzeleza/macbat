@@ -8,6 +8,7 @@ import (
 	"macbat/internal/battery"
 	"macbat/internal/config"
 	"macbat/internal/logger"
+	"macbat/internal/monitor"
 	"macbat/internal/paths"
 	"strconv"
 	"strings"
@@ -124,7 +125,6 @@ func (t *Tray) updateMenu() {
 	t.mCycles.SetTitle(fmt.Sprintf("%-22s    %4d", labels[3], info.CycleCount))   // Циклов заряда
 	t.mHealth.SetTitle(fmt.Sprintf("%-20s %4d%%", labels[4], info.HealthPercent)) // Здоровье батареи
 
-	t.log.Info("Данные меню успешно обновлены.")
 }
 
 // getBatteryIcon возвращает иконку батареи в зависимости от уровня заряда
@@ -247,7 +247,17 @@ func (t *Tray) onReady() {
 
 			// Нажатие на "Выход"
 			case <-mQuit.ClickedCh:
+				if confirmed, err := dlgs.Question("Выход", "Вы уверены, что хотите закрыть приложение?", true); err != nil {
+					dlgs.Error("Ошибка", "Не удалось отобразить диалоговое окно.")
+				} else if !confirmed {
+					// Если пользователь отказался выходить, просто продолжаем цикл обработки событий,
+					// чтобы меню оставалось рабочим.
+					continue
+				}
+
 				t.bgManager.Kill("--background")
+				t.log.Info("Завершение работы приложения...")
+				monitor.UnloadAgent(t.log)
 				systray.Quit()
 				return
 			}

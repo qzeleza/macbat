@@ -49,10 +49,18 @@ build: ## Собрать бинарный файл с информацией о 
 	go build $(LDFLAGS) -o $(BINARY_NAME) $(MAIN_PATH)
 	@echo "$(GREEN)Сборка завершена: ./$(BINARY_NAME)$(NC)"
 
-run: build ## Собрать и запустить приложение
-	@echo "$(GREEN)Запуск $(BINARY_NAME)...$(NC)"
-	killall $(BINARY_NAME)
+run: build ## Собрать и запустить приложение для разработки
+	@echo "$(YELLOW)Остановка и выгрузка системного агента для чистого запуска...$(NC)"
+	launchctl unload -w $(HOME)/Library/LaunchAgents/com.macbat.agent.plist 2>/dev/null || true
+	killall $(BINARY_NAME) 2>/dev/null || true
+	@echo "$(GREEN)Запуск $(BINARY_NAME) в режиме разработки...$(NC)"
 	./$(BINARY_NAME)
+	@echo "$(CYAN)Ожидание запуска фоновых процессов...$(NC)"
+	sleep 2
+	@echo "$(CYAN)Проверка запущенных процессов:$(NC)"
+	ps -ax | grep -v grep | grep '$(BINARY_NAME)' --color=always
+	@echo "$(CYAN)Просмотр логов:$(NC)"
+	$(BINARY_NAME) --log
 
 clean-build: ## Удалить скомпилированный бинарный файл
 	@echo "$(YELLOW)Очистка сборки...$(NC)"

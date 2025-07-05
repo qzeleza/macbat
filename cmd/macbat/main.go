@@ -106,9 +106,11 @@ func main() {
 		if err != nil {
 			fmt.Println("Ошибка чтения лог-файла:", err)
 		} else {
-			fmt.Println("\n---- Журнал приложения ----")
-			fmt.Println(string(logs))
-			fmt.Printf("%s\n", strings.Repeat("-", 80))
+			fmt.Printf("%s\n", strings.Repeat("-", 100))
+			fmt.Println("---- Журнал приложения ----")
+			fmt.Printf("%s\n", strings.Repeat("-", 100))
+			fmt.Printf("%s", string(logs))
+			fmt.Printf("%s\n", strings.Repeat("-", 100))
 			return
 		}
 	}
