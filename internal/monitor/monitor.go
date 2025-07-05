@@ -74,7 +74,6 @@ import (
 	"macbat/internal/config"
 	"macbat/internal/dialog"
 	"macbat/internal/logger"
-	"macbat/internal/simulator"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -134,25 +133,25 @@ func (m *Monitor) Start(mode string) {
 
 	// Определяем источник данных о батарее (реальный или симулятор).
 	var provider batteryInfoProvider
-	if mode == "test" {
-		m.config.DebugEnabled = true // Включаем режим отладки
-		m.notifier.Test("Режим работы: СИМУЛЯТОР.")
-		simulator := simulator.NewBatterySimulator(
-			m.notifier,                // Объект для отправки уведомлений
-			23,                        // Начальный уровень заряда
-			false,                     // Начальное состояние зарядки
-			m.config.MinThreshold,     // Минимальный порог заряда
-			m.config.MaxThreshold,     // Максимальный порог заряда
-			m.config.MaxNotifications, // Максимальное количество уведомлений
-		)
-		provider = func() (*battery.BatteryInfo, error) {
-			// Передаем симулятору обратную связь о количестве показанных уведомлений.
-			return simulator.GetNextState(m.notificationsShown)
-		}
-	} else {
-		m.notifier.Info("Режим работы: РЕАЛЬНЫЕ ДАННЫЕ.")
-		provider = battery.GetBatteryInfo
-	}
+	// if mode == "test" {
+	// 	m.config.DebugEnabled = true // Включаем режим отладки
+	// 	m.notifier.Test("Режим работы: СИМУЛЯТОР.")
+	// 	simulator := simulator.NewBatterySimulator(
+	// 		m.notifier,                // Объект для отправки уведомлений
+	// 		23,                        // Начальный уровень заряда
+	// 		false,                     // Начальное состояние зарядки
+	// 		m.config.MinThreshold,     // Минимальный порог заряда
+	// 		m.config.MaxThreshold,     // Максимальный порог заряда
+	// 		m.config.MaxNotifications, // Максимальное количество уведомлений
+	// 	)
+	// 	provider = func() (*battery.BatteryInfo, error) {
+	// 		// Передаем симулятору обратную связь о количестве показанных уведомлений.
+	// 		return simulator.GetNextState(m.notificationsShown)
+	// 	}
+	// } else {
+	m.notifier.Info("Режим работы: РЕАЛЬНЫЕ ДАННЫЕ.")
+	provider = battery.GetBatteryInfo
+	// }
 
 	// Используем тикер для периодических проверок.
 	ticker := time.NewTicker(time.Duration(m.getCheckInterval()) * time.Second)

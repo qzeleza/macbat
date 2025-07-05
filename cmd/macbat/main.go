@@ -51,7 +51,6 @@ func main() {
 	uninstallFlag := flag.Bool("uninstall", false, "Удаляет приложение и агента launchd")
 	backgroundFlag := flag.Bool("background", false, "Запускает фоновый процесс мониторинга (для опытных пользователей)")
 	guiAgentFlag := flag.Bool("gui-agent", false, "Запускает GUI агента")
-	testFlag := flag.Bool("test", false, "Запускает тестовый режим (для опытных пользователей)")
 	logFlag := flag.Bool("log", false, "Отображает журнал")
 	configFlag := flag.Bool("config", false, "Открывает файл конфигурации для редактирования (для опытных пользователей)")
 	versionFlag := flag.Bool("version", false, "Отображает версию")
@@ -114,19 +113,6 @@ func main() {
 		}
 		log.Info("Удаление успешно завершено.")
 		return
-	}
-
-	// --- Логика тестового режима ---
-	if *testFlag {
-		log.Line()
-		background.Kill(log, "--background")
-		background.Kill(log, "--gui-agent")
-		monitor.UnloadAgent(log)
-		// Запускаем основную задачу мониторинга в тестовом режиме
-		log.Info("Запускаем мониторинг батареи в тестовом режиме...")
-		modeRun = "test"
-		RunGUIAgent(log, conf, cfgManager, modeRun)
-		*backgroundFlag = true // Запускаем фоновый процесс
 	}
 
 	// --- Логика фонового процесса ---
