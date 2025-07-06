@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/qzeleza/macbat/internal/logger"
@@ -79,4 +81,35 @@ func FormatTimeToColonHMS(minutes int) string {
 	h := minutes / 60
 	m := minutes % 60
 	return fmt.Sprintf("%02dч %02dм", h, m)
+}
+
+// ExtractMenuItemText извлекает текст из входной строки, находящийся в кавычках.
+// Удаляет все не-ASCII символы (например, эмодзи) и приводит пробелы к единому формату.
+// Возвращает очищенный текст или пустую строку, если текст в кавычках не найден.
+//
+// @param input string - входная строка, содержащая текст в кавычках.
+// @return string - очищенный текст без не-ASCII символов и с нормализованными пробелами.
+func ExtractMenuItemText(input string) string {
+	// Найти текст в кавычках
+	re := regexp.MustCompile(`"([^"]*)"`)
+	matches := re.FindStringSubmatch(input)
+
+	if len(matches) < 2 {
+		return ""
+	}
+
+	text := matches[1]
+
+	// Убрать эмодзи (все не-ASCII символы)
+	var result []rune
+	for _, r := range text {
+		if r <= 127 { // ASCII символы
+			result = append(result, r)
+		}
+	}
+
+	// Преобразовать обратно в строку и очистить пробелы
+	cleaned := string(result)
+	cleaned = regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " ")
+	return strings.TrimSpace(cleaned)
 }

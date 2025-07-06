@@ -36,7 +36,7 @@ func ShowDialogNotification(title, message string, log *logger.Logger) error {
 		return fmt.Errorf("%s", errMsg)
 	}
 
-	script := fmt.Sprintf(`display dialog "%s" with title "%s" with icon caution buttons {"OK"} default button "OK" giving up after 7`,
+	script := fmt.Sprintf(`display dialog "%s" with title "%s" with icon caution buttons {"OK"} default button "OK" giving up after 10`,
 		strings.ReplaceAll(message, `"`, `\"`),
 		strings.ReplaceAll(title, `"`, `\"`))
 
@@ -75,8 +75,8 @@ func IsNotificationAvailable(log *logger.Logger) bool {
 	}
 
 	// Проверяем, что мы можем отправить тестовое уведомление
-	testCmd := exec.Command("osascript", "-e", `display notification "" with title "MacBat Test"`)
-	if err := testCmd.Run(); err != nil {
+	runCmd := exec.Command("osascript", "-e", `display notification "" with title "MacBat Test"`)
+	if err := runCmd.Run(); err != nil {
 		log.Error("Не удалось отправить тестовое уведомление: " + err.Error())
 		return false
 	}

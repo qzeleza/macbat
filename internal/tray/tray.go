@@ -76,8 +76,8 @@ func (t *Tray) onReady() {
 	systray.SetTooltip("Управление macbat")
 
 	// --- Создание элементов меню ---
-	t.mVersion = systray.AddMenuItem("Версия ...", "Версия macbat")
-	t.mVersion.Disable()
+	t.mVersion = systray.AddMenuItem("Версия ...", "Версия приложения macbat")
+	// t.mVersion.Disable()
 	systray.AddSeparator()
 	// Режим работы
 	t.mChargeMode = systray.AddMenuItem("Режим работы ...", "Текущий режим заряда")
@@ -86,15 +86,12 @@ func (t *Tray) onReady() {
 	// --- Информационные пункты о времени зарядки/разрядки ---
 	// Текущий заряд батареи
 	t.mCurrent = systray.AddMenuItem("Загрузка...", "Текущий заряд батареи")
-	t.timeToFullCharge = systray.AddMenuItem("Время до полной зарядки ...", "Расчётное время до 100% заряда")
-	t.timeToEmptyCharge = systray.AddMenuItem("Время до полной разрядки ...", "Расчётное время до 0% заряда")
+	t.timeToFullCharge = systray.AddMenuItem("Время до полной зарядки ...", "Расчётное время до полного заряда")
+	t.timeToEmptyCharge = systray.AddMenuItem("Время до полной разрядки ...", "Расчётное время до полного разряда")
 	t.timeToEmptyCharge.Hide()
 	t.timeToFullCharge.Hide()
 
 	// --- Пункты настройки порогов ---
-	systray.AddSeparator()
-	t.mMin = systray.AddMenuItem("Мин. порог ...", "Установить минимальный порог")
-	t.mMax = systray.AddMenuItem("Макс. порог ...", "Установить максимальный порог")
 	systray.AddSeparator()
 
 	// --- Информационные пункты о состоянии батареи ---
@@ -103,14 +100,18 @@ func (t *Tray) onReady() {
 	t.mHealth = systray.AddMenuItem("Здоровье батареи ...", "Состояние аккумулятора")
 	systray.AddSeparator()
 
+	t.mSettings = systray.AddMenuItem("Пороги отслеживания", "")
+	t.mMin = t.mSettings.AddSubMenuItem("Мин. порог ...", "Установить минимальный порог")
+	t.mMax = t.mSettings.AddSubMenuItem("Макс. порог ...", "Установить максимальный порог")
+
 	// --- Подменю интервалов и уведомлений ---
-	t.mSettings = systray.AddMenuItem("Пороговые интервалы", "Настроить пороговые значения")
+	t.mSettings = systray.AddMenuItem("Пороговые интервалы", "")
 	t.mCheckCharging = t.mSettings.AddSubMenuItem("Интервал проверки при зарядке", "Установка интервала проверки, когда батарея заряжается")
 	t.mCheckDischarging = t.mSettings.AddSubMenuItem("Интервал проверки при разрядке", "Установка интервала проверки, когда батарея разряжается")
 	t.mMaxNotifications = t.mSettings.AddSubMenuItem("Число уведомлений", "Установка максимального количества повторов уведомлений о достижении порогов")
 
 	// --- Подменю настроек и журнала ---
-	t.mSettings = systray.AddMenuItem("Настройки и журнал", "Открыть")
+	t.mSettings = systray.AddMenuItem("Настройки и журнал", "")
 	t.mConfig = t.mSettings.AddSubMenuItem("Открыть config.json", "Открыть файл конфигурации")
 	t.mLogs = t.mSettings.AddSubMenuItem("Открыть macbat.log", "Открыть журнал ошибок и сообщений")
 
@@ -149,21 +150,16 @@ func (t *Tray) updateMenu() {
 	}
 
 	// Получаем строку для отображения режима зарядки
-	chargeModeStr := "Ноутбук питается от батареи"
-	chargeModeIcon := "🪫"
-	if info.IsCharging {
-		chargeModeStr = "Ноутбук заряжаем от сети"
-		chargeModeIcon = "🔌"
-	}
+	chargeModeStr, chargeModeIcon := getChargeModeStr(info.IsCharging)
 
 	// Получаем пороги из конфигурации
 	minThreshold := t.cfg.MinThreshold
 	maxThreshold := t.cfg.MaxThreshold
 
-	t.mVersion.SetTitle("Версия macbat " + version.Version)
+	t.mVersion.SetTitle("Версия приложения macbat " + version.Version)
 	// Обновляем заголовок с иконкой батареи
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
-	t.mChargeMode.SetTitle(fmt.Sprintf("%-29s %-4s", chargeModeStr, chargeModeIcon))
+	t.mChargeMode.SetTitle(fmt.Sprintf("%-30s %-4s", chargeModeStr, chargeModeIcon))
 
 	t.mCurrent.SetTitle(fmt.Sprintf("%-29s %4d%%  %-4s", "Текущий заряд", info.CurrentCapacity, icon))
 	if info.IsCharging {
@@ -197,6 +193,15 @@ func (t *Tray) updateMenu() {
 	t.mCheckCharging.SetTitle(fmt.Sprintf("%-36s %4d с.", "Интервал проверки при зарядке", t.cfg.CheckIntervalWhenCharging))
 	t.mCheckDischarging.SetTitle(fmt.Sprintf("%-35s %4d с.", "Интервал проверки при разрядке", t.cfg.CheckIntervalWhenDischarging))
 	t.mMaxNotifications.SetTitle(fmt.Sprintf("%-45s %4d ув.", "Число уведомлений", t.cfg.MaxNotifications))
+}
+
+// getChargeModeStr возвращает строку для отображения режима зарядки
+// батареи, а также иконку, изображающую режим зарядки.
+func getChargeModeStr(isCharging bool) (string, string) {
+	if isCharging {
+		return "Ноутбук заряжаем от сети", "🔌"
+	}
+	return "Ноутбук питается от батареи", "🪫"
 }
 
 // getMinThresholdIndicator возвращает цветной индикатор для минимального порога.
@@ -292,6 +297,20 @@ func (t *Tray) handleMenuClicks(mSettings, mLogs, mConfig, mQuit *systray.MenuIt
 			if err := paths.OpenFileOrDir(paths.ConfigPath()); err != nil {
 				dlgs.Error("Ошибка", "Не удалось открыть файл конфигурации.")
 			}
+
+		// --- Выбрали пункт "Текущий заряд" ---
+		// case <-t.mCurrent.ClickedCh:
+		// 	// dlgs.Info("Информация", fmt.Sprintf("Сейчас %s", utils.ExtractMenuItemText(strings.ToLower(t.mCurrent.String()))))
+		// 	dlgs.Info("Информация", fmt.Sprintf("Сейчас %s", strings.ToLower(t.mCurrent.String())))
+
+		// // --- Выбрали пункт "Режим зарядки" ---
+		// case <-t.mChargeMode.ClickedCh:
+		// 	// dlgs.Info("Информация", fmt.Sprintf("Сейчас %s", utils.ExtractMenuItemText(strings.ToLower(t.mChargeMode.String()))))
+		// 	dlgs.Info("Информация", fmt.Sprintf("Сейчас %s", strings.ToLower(t.mChargeMode.String())))
+
+		// --- Выбрали пункт "Версия" ---
+		case <-t.mVersion.ClickedCh:
+			dlgs.Info("Информация", fmt.Sprintf("Текущая версия приложения macbat: %s", version.Version))
 
 		// --- Выбрали пункт "Логи" ---
 		case <-t.mLogs.ClickedCh:
