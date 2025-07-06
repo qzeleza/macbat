@@ -17,6 +17,7 @@ import (
 	"github.com/qzeleza/macbat/internal/monitor"
 	"github.com/qzeleza/macbat/internal/paths"
 	"github.com/qzeleza/macbat/internal/utils"
+	"github.com/qzeleza/macbat/internal/version"
 
 	"github.com/gen2brain/dlgs"
 	"github.com/getlantern/systray"
@@ -42,6 +43,7 @@ type Tray struct {
 	mLogs             *systray.MenuItem
 	timeToFullCharge  *systray.MenuItem
 	timeToEmptyCharge *systray.MenuItem
+	mVersion          *systray.MenuItem
 	updateMu          sync.Mutex
 }
 
@@ -74,6 +76,9 @@ func (t *Tray) onReady() {
 	systray.SetTooltip("Управление macbat")
 
 	// --- Создание элементов меню ---
+	t.mVersion = systray.AddMenuItem("Версия ...", "Версия macbat")
+	t.mVersion.Disable()
+	systray.AddSeparator()
 	// Режим работы
 	t.mChargeMode = systray.AddMenuItem("Режим работы ...", "Текущий режим заряда")
 	systray.AddSeparator()
@@ -155,6 +160,7 @@ func (t *Tray) updateMenu() {
 	minThreshold := t.cfg.MinThreshold
 	maxThreshold := t.cfg.MaxThreshold
 
+	t.mVersion.SetTitle("Версия macbat " + version.Version)
 	// Обновляем заголовок с иконкой батареи
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
 	t.mChargeMode.SetTitle(fmt.Sprintf("%-29s %-4s", chargeModeStr, chargeModeIcon))
