@@ -1,9 +1,10 @@
 # macbat.rb
+
 class Macbat < Formula
-  desc "Утилита для мониторинга и управления зарядом батареи MacBook"
-  homepage "https://github.com/samovar/macbat" # ЗАМЕНИТЕ НА ССЫЛКУ ВАШЕГО РЕПОЗИТОРИЯ
-  url "https://github.com/samovar/macbat/archive/refs/tags/v0.1.0.tar.gz" # ЗАМЕНИТЕ НА URL АРХИВА РЕЛИЗА
-  version "0.1.0" # ЗАМЕНИТЕ НА ВАШУ ВЕРСИЮ
+  desc "Утилита для мониторинга и управления зарядом батареи на ноутбуке с macOS X"
+  homepage "https://github.com/zeleza/macbat" # ЗАМЕНИТЕ НА ССЫЛКУ ВАШЕГО РЕПОЗИТОРИЯ
+  url "https://github.com/zeleza/macbat/archive/refs/tags/v0.4.0.tar.gz" # ЗАМЕНИТЕ НА URL АРХИВА РЕЛИЗА
+  version "0.4.0" # ЗАМЕНИТЕ НА ВАШУ ВЕРСИЮ
   sha256 "..." # ЗАМЕНИТЕ НА SHA256 ВАШЕГО АРХИВА
 
   depends_on "go" => :build

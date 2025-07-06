@@ -81,11 +81,11 @@ func NewBatterySimulator(logger *logger.Logger,
  * управляет фазами разрядки и зарядки, изменяя заряд в пределах триггерных
  * зон и переключая состояния симулятора при достижении порогов.
  *
- * @param monitorNotificationsShown Количество уведомлений, показанных монитором.
+ * @param monitornotificationsRemaining Количество уведомлений, показанных монитором.
  * @return Указатель на структуру BatteryInfo с текущим состоянием батареи.
  * @return error Всегда возвращает nil, так как ошибки не обрабатываются.
  */
-func (s *BatterySimulator) GetNextState(monitorNotificationsShown int) (*battery.BatteryInfo, error) {
+func (s *BatterySimulator) GetNextState(monitornotificationsRemaining int) (*battery.BatteryInfo, error) {
 
 	const step = 2 // Шаг изменения заряда
 
@@ -103,9 +103,9 @@ func (s *BatterySimulator) GetNextState(monitorNotificationsShown int) (*battery
 
 	// Фаза достижения минимального порога разряда (дождемся пока не будет показано maxNotifications уведомлений)
 	case StateTriggeringMin:
-		s.notifier.Test(fmt.Sprintf("Ожидание (Разрядка). Показано монитором: %d. ", monitorNotificationsShown))
+		s.notifier.Test(fmt.Sprintf("Ожидание (Разрядка). Показано монитором: %d. ", monitornotificationsRemaining))
 		// Если количество показанных уведомлений больше или равно maxNotifications, то переключаем состояние на StateRampingUp
-		if monitorNotificationsShown >= s.maxNotifications {
+		if monitornotificationsRemaining >= s.maxNotifications {
 			s.notifier.Test("Монитор показал все уведомления! Переключаю на зарядку.")
 			s.info.IsCharging = true                       // Устанавливаем зарядку в true
 			s.state = StateRampingUp                       // Переключаем состояние на StateRampingUp
@@ -134,9 +134,9 @@ func (s *BatterySimulator) GetNextState(monitorNotificationsShown int) (*battery
 	// Фаза до достижения максимального порога зарядки
 	// (дождемся пока не будет показано maxNotifications уведомлений)
 	case StateTriggeringMax:
-		s.notifier.Test(fmt.Sprintf("Ожидание (Зарядка). Показано монитором: %d. ", monitorNotificationsShown))
+		s.notifier.Test(fmt.Sprintf("Ожидание (Зарядка). Показано монитором: %d. ", monitornotificationsRemaining))
 		// Если количество показанных уведомлений больше или равно maxNotifications, то переключаем состояние на StateRampingDown
-		if monitorNotificationsShown >= s.maxNotifications {
+		if monitornotificationsRemaining >= s.maxNotifications {
 			s.notifier.Test("Монитор показал все уведомления! Переключаю на разрядку.")
 			s.info.IsCharging = false                      // Устанавливаем зарядку в false
 			s.state = StateRampingDown                     // Переключаем состояние на StateRampingDown

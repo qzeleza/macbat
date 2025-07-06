@@ -79,13 +79,13 @@ import (
  * @brief Основной объект, который управляет состоянием и логикой мониторинга.
  */
 type Monitor struct {
-	config               config.Config  // Конфигурация монитора.
-	notifier             *logger.Logger // Объект для отправки уведомлений.
-	lastNotificationTime time.Time      // Временная метка последнего уведомления.
-	notificationsShown   int            // Счетчик показанных уведомлений в текущем цикле.
-	lastKnownCharging    bool           // Последнее известное состояние (заряжается/не заряжается).
-	isInitialized        bool           // Флаг, показывающий, был ли монитор запущен хотя бы раз.
-	lastLevel            int            // Последний известный уровень заряда для оптимизации.
+	config                 config.Config  // Конфигурация монитора.
+	notifier               *logger.Logger // Объект для отправки уведомлений.
+	lastNotificationTime   time.Time      // Временная метка последнего уведомления.
+	notificationsRemaining int            // Счетчик показанных уведомлений в текущем цикле.
+	lastKnownCharging      bool           // Последнее известное состояние (заряжается/не заряжается).
+	isInitialized          bool           // Флаг, показывающий, был ли монитор запущен хотя бы раз.
+	lastLevel              int            // Последний известный уровень заряда для оптимизации.
 }
 
 //================================================================================
@@ -133,7 +133,7 @@ func (m *Monitor) Start() {
 			m.config.MaxNotifications,
 		)
 		provider = func() (*battery.BatteryInfo, error) {
-			return simulator.GetNextState(m.notificationsShown)
+			return simulator.GetNextState(m.notificationsRemaining)
 		}
 	} else {
 		m.notifier.Info("Режим работы: РЕАЛЬНЫЕ ДАННЫЕ.")
@@ -212,7 +212,7 @@ func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
  */
 func (m *Monitor) resetState(newChargingState bool) {
 	m.lastNotificationTime = time.Time{} // Сброс на "нулевое" время.
-	m.notificationsShown = 0
+	m.notificationsRemaining = 0
 	m.lastKnownCharging = newChargingState
 	m.lastLevel = -1.0 // Сбрасываем уровень, чтобы следующая проверка точно сработала.
 }
@@ -230,11 +230,11 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 	}
 
 	// Дополнительные условия: не превышен лимит уведомлений и прошел ли интервал.
-	if m.notificationsShown < m.config.MaxNotifications && now.Sub(m.lastNotificationTime) >= m.config.NotificationInterval {
+	if m.notificationsRemaining < m.config.MaxNotifications && now.Sub(m.lastNotificationTime) >= m.config.NotificationInterval {
 		message := fmt.Sprintf(
 			"Батарея разряжена до %d%%.\nПожалуйста, подключите зарядку.\nОсталось %d увед.",
 			info.CurrentCapacity,
-			m.config.MaxNotifications-m.notificationsShown,
+			m.config.MaxNotifications-m.notificationsRemaining,
 		)
 		// Отправляем уведомление в консоль
 		m.notifier.Check(message)
@@ -243,7 +243,7 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 			m.notifier.Error(err.Error())
 		}
 		m.lastNotificationTime = now
-		m.notificationsShown++
+		m.notificationsRemaining++
 	}
 }
 
@@ -260,11 +260,11 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 	}
 
 	// Дополнительные условия: не превышен лимит уведомлений и прошел ли интервал.
-	if m.notificationsShown < m.config.MaxNotifications && now.Sub(m.lastNotificationTime) >= m.config.NotificationInterval {
+	if m.notificationsRemaining < m.config.MaxNotifications && now.Sub(m.lastNotificationTime) >= m.config.NotificationInterval {
 		message := fmt.Sprintf(
 			"Батарея заряжена до %d%%.\nПожалуйста, отключите зарядку.\nОсталось %d увед.",
 			info.CurrentCapacity,
-			m.config.MaxNotifications-m.notificationsShown,
+			m.config.MaxNotifications-m.notificationsRemaining,
 		)
 		// Отправляем уведомление в консоль
 		m.notifier.Check(message)
@@ -273,6 +273,6 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 			m.notifier.Error(err.Error())
 		}
 		m.lastNotificationTime = now
-		m.notificationsShown++
+		m.notificationsRemaining++
 	}
 }

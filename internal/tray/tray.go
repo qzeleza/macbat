@@ -10,9 +10,12 @@ import (
 	"macbat/internal/logger"
 	"macbat/internal/monitor"
 	"macbat/internal/paths"
+	"macbat/internal/utils"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gen2brain/dlgs"
 	"github.com/getlantern/systray"
@@ -36,6 +39,8 @@ type Tray struct {
 	mSettings         *systray.MenuItem
 	mConfig           *systray.MenuItem
 	mLogs             *systray.MenuItem
+	timeToFullCharge  *systray.MenuItem
+	timeToEmptyCharge *systray.MenuItem
 	updateMu          sync.Mutex
 }
 
@@ -59,19 +64,86 @@ func (t *Tray) onExit() {
 	// Здесь можно выполнить очистку, если это необходимо.
 }
 
+// onReady инициализирует иконку в трее, создает основные пункты меню, настраивает
+// обработку кликов, а также запускает периодические обновления меню.
+func (t *Tray) onReady() {
+
+	// Устанавливаем иконку для системного меню
+	systray.SetTitle("🔋👀") // Заголовок в виде эмодзи
+	systray.SetTooltip("Управление macbat")
+
+	// --- Создание элементов меню ---
+
+	t.mChargeMode = systray.AddMenuItem("Режим работы ...", "Текущий режим заряда")
+
+	// --- Пункты настройки порогов ---
+	systray.AddSeparator()
+	t.mMin = systray.AddMenuItem("Мин. порог ...", "Установить минимальный порог")
+	t.mMax = systray.AddMenuItem("Макс. порог ...", "Установить максимальный порог")
+	systray.AddSeparator()
+
+	// --- Информационные пункты о времени зарядки/разрядки ---
+	t.mCurrent = systray.AddMenuItem("Загрузка...", "Текущий заряд батареи")
+	t.timeToFullCharge = systray.AddMenuItem("Время до полной зарядки ...", "Расчётное время до 100% заряда")
+	t.timeToEmptyCharge = systray.AddMenuItem("Время до полной разрядки ...", "Расчётное время до 0% заряда")
+	t.timeToEmptyCharge.Hide()
+	t.timeToFullCharge.Hide()
+
+	// --- Информационные пункты о состоянии батареи ---
+	systray.AddSeparator()
+	t.mCycles = systray.AddMenuItem("Циклов заряда ...", "Количество циклов перезарядки")
+	t.mHealth = systray.AddMenuItem("Здоровье батареи ...", "Состояние аккумулятора")
+	systray.AddSeparator()
+
+	// --- Подменю интервалов и уведомлений ---
+	t.mSettings = systray.AddMenuItem("Пороговые интервалы", "Настроить пороговые значения")
+	t.mCheckCharging = t.mSettings.AddSubMenuItem("Интервал проверки при зарядке", "Установка интервала проверки, когда батарея заряжается")
+	t.mCheckDischarging = t.mSettings.AddSubMenuItem("Интервал проверки при разрядке", "Установка интервала проверки, когда батарея разряжается")
+	t.mMaxNotifications = t.mSettings.AddSubMenuItem("Число уведомлений", "Установка максимального количества повторов уведомлений о достижении порогов")
+
+	// --- Подменю настроек и журнала ---
+	t.mSettings = systray.AddMenuItem("Настройки и журнал", "Открыть")
+	t.mConfig = t.mSettings.AddSubMenuItem("Открыть config.json", "Открыть файл конфигурации")
+	t.mLogs = t.mSettings.AddSubMenuItem("Открыть macbat.log", "Открыть журнал ошибок и сообщений")
+
+	// --- Кнопка "Выход" ---
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem("Выход", "Закрыть приложение")
+
+	// Запускаем горутину для обновления меню каждые 5 секунд
+	go func() {
+		runtime.LockOSThread()                    // ➊ работаем всегда в одном ОС-потоке
+		ticker := time.NewTicker(5 * time.Second) // ➋ каждые 5 секунд
+		defer ticker.Stop()                       // ➌ останавливаем тикер при завершении горутины
+
+		for range ticker.C {
+			t.updateMenu() // ➋ обращаемся к IOKit в «правильном» потоке и обновляем меню
+		}
+
+	}()
+
+	// Запускаем горутину для обработки кликов
+	go t.handleMenuClicks(t.mSettings, t.mLogs, t.mConfig, mQuit)
+}
+
+// updateMenu обновляет меню приложения с информацией о текущем состоянии
+// батареи, порогах и настройках.
 func (t *Tray) updateMenu() {
+	// Защищаем обновление меню от конкурентных вызовов
 	t.updateMu.Lock()
 	defer t.updateMu.Unlock()
 
+	// Получаем информацию о батарее
 	info, err := battery.GetBatteryInfo()
 	if err != nil {
 		t.mCurrent.SetTitle("Ошибка получения данных")
 		return
 	}
 
-	chargeModeStr := "Ноутбук работает от батареи"
+	// Получаем строку для отображения режима зарядки
+	chargeModeStr := "Ноутбук работает от батареи 🪫"
 	if info.IsCharging {
-		chargeModeStr = "Ноутбук заряжается от сети"
+		chargeModeStr = "Ноутбук заряжается от сети 🔌"
 	}
 
 	// Получаем пороги из конфигурации
@@ -80,23 +152,40 @@ func (t *Tray) updateMenu() {
 
 	// Обновляем заголовок с иконкой батареи
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
-	t.mChargeMode.SetTitle(fmt.Sprintf("%s", chargeModeStr))
+	t.mChargeMode.SetTitle(chargeModeStr)
 
 	t.mCurrent.SetTitle(fmt.Sprintf("%-30s %3d%% %s", "Текущий заряд", info.CurrentCapacity, icon))
+	if info.IsCharging {
+		t.timeToFullCharge.SetTitle(fmt.Sprintf("%-26s %s", "До полного заряда", utils.FormatTimeToColonHMS(info.TimeToFull)))
+		t.timeToEmptyCharge.Hide()
+		t.timeToFullCharge.Show()
+	} else {
+		t.timeToEmptyCharge.SetTitle(fmt.Sprintf("%-27s %s", "До полного разряда", utils.FormatTimeToColonHMS(info.TimeToEmpty)))
+		t.timeToFullCharge.Hide()
+		t.timeToEmptyCharge.Show()
+	}
 
+	// Записываем текущий заряд в лог
+	t.log.Info(fmt.Sprintf("Текущий заряд: %d%%", info.CurrentCapacity))
+
+	// Получаем индикаторы для порогов
 	minIndicator := getMinThresholdIndicator(minThreshold)
 	maxIndicator := getMaxThresholdIndicator(maxThreshold)
+
+	// Обновляем пункты меню
 	t.mMin.SetTitle(fmt.Sprintf("%-34s %3d%% %s", "Мин. порог", minThreshold, minIndicator))
 	t.mMax.SetTitle(fmt.Sprintf("%-33s %3d%% %s", "Макс. порог", maxThreshold, maxIndicator))
 
+	// Обновляем пункты меню
 	healthIndicator := getHealthIndicator(info.HealthPercent)
 	cyclesIndicator := getCyclesIndicator(info.CycleCount)
-	t.mCycles.SetTitle(fmt.Sprintf("%-31s %4d %s", "Циклов заряда", info.CycleCount, cyclesIndicator))
-	t.mHealth.SetTitle(fmt.Sprintf("%-27s %4d%% %s", "Здоровье батареи", info.HealthPercent, healthIndicator))
+	t.mCycles.SetTitle(fmt.Sprintf("%-32s %4d %s", "Циклов заряда", info.CycleCount, cyclesIndicator))
+	t.mHealth.SetTitle(fmt.Sprintf("%-28s %4d%% %s", "Здоровье батареи", info.HealthPercent, healthIndicator))
 
+	// Обновляем пункты меню
 	t.mCheckCharging.SetTitle(fmt.Sprintf("%-35s %3d с.", "Интервал проверки при зарядке", t.cfg.CheckIntervalWhenCharging))
 	t.mCheckDischarging.SetTitle(fmt.Sprintf("%-35s %3d с.", "Интервал проверки при разрядке", t.cfg.CheckIntervalWhenDischarging))
-	t.mMaxNotifications.SetTitle(fmt.Sprintf("%-44s %3d ув.", "Число уведомлений", t.cfg.MaxNotifications))
+	t.mMaxNotifications.SetTitle(fmt.Sprintf("%-44s %4d ув.", "Число уведомлений", t.cfg.MaxNotifications))
 }
 
 // getMinThresholdIndicator возвращает цветной индикатор для минимального порога.
@@ -132,7 +221,7 @@ func getHealthIndicator(health int) string {
 	switch {
 	case health > 90:
 		return "🟢" // Отлично
-	case health > 80:
+	case health > 70:
 		return "🟡" // Нормально
 	default:
 		return "🔴" // Требует внимания
@@ -174,79 +263,56 @@ func getBatteryIcon(percent int, isCharging bool) string {
 	}
 }
 
-// onReady инициализирует иконку в трее и запускает главный цикл обработки событий.
-func (t *Tray) onReady() {
-	systray.SetIcon(getAppIconFromFile())
-	systray.SetTitle("👀")
-	systray.SetTooltip("Управление macbat")
-
-	// --- Создание элементов меню ---
-
-	t.mChargeMode = systray.AddMenuItem("Режим работы ...", "Текущий режим заряда")
-
-	systray.AddSeparator()
-	t.mMin = systray.AddMenuItem("Мин. порог ...", "Установить минимальный порог")
-	t.mCurrent = systray.AddMenuItem("Загрузка...", "Текущий заряд батареи")
-	t.mMax = systray.AddMenuItem("Макс. порог ...", "Установить максимальный порог")
-
-	systray.AddSeparator()
-	t.mCycles = systray.AddMenuItem("Циклов заряда ...", "Количество циклов перезарядки")
-	t.mHealth = systray.AddMenuItem("Здоровье батареи ...", "Состояние аккумулятора")
-	systray.AddSeparator()
-
-	// --- Подменю интервалов и уведомлений ---
-	t.mSettings = systray.AddMenuItem("Пороговые интервалы", "Настроить пороговые значения")
-	t.mCheckCharging = t.mSettings.AddSubMenuItem("Интервал проверки при зарядке", "Установка интервала проверки, когда батарея заряжается")
-	t.mCheckDischarging = t.mSettings.AddSubMenuItem("Интервал проверки при разрядке", "Установка интервала проверки, когда батарея разряжается")
-	t.mMaxNotifications = t.mSettings.AddSubMenuItem("Число уведомлений", "Установка максимального количества повторов уведомлений о достижении порогов")
-	// separator := t.mSettings.AddSubMenuItem("──────────────────", "Разделитель")
-	// separator.Disable()
-	t.mSettings = systray.AddMenuItem("Настройки и журнал", "Открыть")
-	t.mConfig = t.mSettings.AddSubMenuItem("Открыть config.json", "Открыть файл конфигурации")
-	t.mLogs = t.mSettings.AddSubMenuItem("Открыть macbat.log", "Открыть журнал ошибок и сообщений")
-
-	// --- Кнопка "Выход" ---
-	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Выход", "Закрыть приложение")
-	t.updateMenu()
-	// Запускаем горутину для обработки кликов
-	go t.handleMenuClicks(t.mSettings, t.mLogs, t.mConfig, mQuit)
-}
-
+// handleMenuClicks обрабатывает нажатия на пункты меню.
+//
+// @param mSettings - пункт "Настройки"
+// @param mLogs - пункт "Логи"
+// @param mConfig - пункт "Конфигурация"
+// @param mQuit - пункт "Выход"
+//
+// handleMenuClicks является goroutin'ом, который постоянно слушает каналы
+// нажатий на пункты меню.
 func (t *Tray) handleMenuClicks(mSettings, mLogs, mConfig, mQuit *systray.MenuItem) {
+
 	for {
 		select {
-		// --- Обработка общих нажатий ---
+		// --- Выбрали пункт "Конфигурация" ---
 		case <-t.mConfig.ClickedCh:
 			if err := paths.OpenFileOrDir(paths.ConfigPath()); err != nil {
 				dlgs.Error("Ошибка", "Не удалось открыть файл конфигурации.")
 			}
 
+		// --- Выбрали пункт "Логи" ---
 		case <-t.mLogs.ClickedCh:
 			if err := paths.OpenFileOrDir(paths.LogPath()); err != nil {
 				dlgs.Error("Ошибка", "Не удалось открыть директорию логов.")
 			}
 
+		// --- Выбрали пункт "Здоровье батареи" ---
 		case <-t.mHealth.ClickedCh:
 			dlgs.Info("Здоровье батареи", "Здоровье батареи в современных ноутбуках определяется по состоянию износа аккумулятора. Если значение больше 90%, то это хороший результат, если меньше 50%, то пора задуматься над заменой аккумулятора.")
 
+		// --- Выбрали пункт "Циклы заряда" ---
 		case <-t.mCycles.ClickedCh:
 			dlgs.Info("Циклы заряда", "Циклы заряда определяются по количеству перезарядок. Если значение меньше 500 циклов, то это хороший результат, если больше 1000, то пора задуматься над заменой аккумулятора.")
 
-		// --- Обработка нажатий на пороги ---
+		// --- Выбрали пункт "Минимальный порог" ---
 		case <-t.mMin.ClickedCh:
 			t.handleThresholdChange("min")
 
+		// --- Выбрали пункт "Максимальный порог" ---
 		case <-t.mMax.ClickedCh:
 			t.handleThresholdChange("max")
 
-		// --- Обработка нажатий на интервалы ---
+		// --- Выбрали пункт "Интервал проверки (зарядка)" ---
 		case <-t.mCheckCharging.ClickedCh:
 			t.handleIntegerConfigChange("check_interval_charging", "Интервал проверки (зарядка)", "Введите интервал в секундах:")
 
+		// --- Выбрали пункт "Интервал проверки (разрядка)" ---
 		case <-t.mCheckDischarging.ClickedCh:
 			t.handleIntegerConfigChange("check_interval_discharging", "Интервал проверки (разрядка)", "Введите интервал в секундах:")
 
+		// --- Выбрали пункт "Количество уведомлений" ---
 		case <-t.mMaxNotifications.ClickedCh:
 			t.handleIntegerConfigChange("max_notifications", "Количество уведомлений", "Введите максимальное количество уведомлений:")
 
@@ -268,6 +334,15 @@ func (t *Tray) handleMenuClicks(mSettings, mLogs, mConfig, mQuit *systray.MenuIt
 }
 
 // handleIntegerConfigChange обрабатывает изменение целочисленных значений конфигурации.
+//
+// @param key - ключ конфигурации, который нужно изменить
+// @param title - заголовок диалогового окна
+// @param prompt - текст приглашения в диалоговом окне
+//
+// Диалоговое окно ввода будет отображено с текущим значением конфигурации.
+// Если пользователь отменит ввод, то ничего не будет изменено.
+// Если пользователь введет корректное целое число, то конфигурация будет обновлена.
+// Если пользователь введет что-то неправильное, то будет отображена ошибка.
 func (t *Tray) handleIntegerConfigChange(key, title, prompt string) {
 	var currentVal int
 	switch key {
@@ -317,6 +392,9 @@ func (t *Tray) handleIntegerConfigChange(key, title, prompt string) {
 }
 
 // handleThresholdChange обрабатывает логику изменения порогов.
+//
+// Диалог предлагает пользователю ввести новое значение порога, которое
+// будет сохранено в конфигурации.
 func (t *Tray) handleThresholdChange(mode string) {
 	var title, prompt, currentValStr string
 	var currentVal int
@@ -377,11 +455,4 @@ func (t *Tray) handleThresholdChange(mode string) {
 		// Обновляем меню немедленно, чтобы показать изменения
 		t.updateMenu()
 	}
-}
-
-//go:embed sys-tray-icon.png
-var iconData []byte
-
-func getAppIconFromFile() []byte {
-	return iconData
 }

@@ -197,15 +197,18 @@ func IsAgentRunning(log *logger.Logger) bool {
 	agentID := paths.AgentIdentifier()
 	cmd := exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/"+agentID, os.Getuid()))
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Debug(fmt.Sprintf("Агент не запущен или произошла ошибка: %v", err))
+	if err != nil && !strings.Contains(string(output), "Could not find service") {
+		log.Debug(fmt.Sprintf("Агент не запущен, ошибка: %v", err))
 		return false
 	}
-
-	log.Debug("Проверка статуса агента, state = " + strings.TrimSpace(strings.Split(string(output), "state = ")[1][:strings.Index(strings.Split(string(output), "state = ")[1], "\n")]))
-	log.Line()
+	// Если в выводе содержится "Could not find service", значит агент не запущен, но ошибки нет
+	if strings.Contains(string(output), "Could not find service") {
+		log.Debug("Агент не запущен.")
+		return false
+	}
+	log.Debug("Агент запущен.")
 	// Проверяем, что PID существует и процесс не является \"Could not find service\"
-	return strings.Contains(string(output), agentID) && !strings.Contains(string(output), "Could not find service")
+	return strings.Contains(string(output), agentID)
 }
 
 // removeOldFiles удаляет старые файлы конфигурации и логов.
@@ -254,6 +257,12 @@ func LoadAgent(log *logger.Logger) (bool, error) {
 			log.Error(mess)
 			return false, fmt.Errorf("%s", mess)
 		}
+		cmd = exec.Command("launchctl", "enable", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
+		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
+			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
+			log.Error(mess)
+			return false, fmt.Errorf("%s", mess)
+		}
 		return true, nil
 	}
 	mess := "Агент уже загружен посредством launchctl"
@@ -270,7 +279,13 @@ func LoadAgent(log *logger.Logger) (bool, error) {
 // @return error Ошибка, если не удалось выгрузить агента
 func UnloadAgent(log *logger.Logger) (bool, error) {
 	if IsAgentRunning(log) {
-		cmd := exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
+		cmd := exec.Command("launchctl", "enable", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
+		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
+			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
+			log.Error(mess)
+			return false, fmt.Errorf("%s", mess)
+		}
+		cmd = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
 		if err := cmd.Run(); err != nil && !strings.Contains(err.Error(), "Boot-out failed: 5: Input/output error") {
 			mess := fmt.Sprintf("не удалось выгрузить агент: %v", err)
 			log.Error(mess)

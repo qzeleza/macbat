@@ -1,3 +1,6 @@
+
+
+
 # Makefile для тестирования модуля батареи MacBat
 # РАБОЧАЯ ВЕРСИЯ - правильная работа с test_*.go
 
@@ -54,13 +57,11 @@ run: build ## Собрать и запустить приложение для �
 	launchctl unload -w $(HOME)/Library/LaunchAgents/com.macbat.agent.plist 2>/dev/null || true
 	killall $(BINARY_NAME) 2>/dev/null || true
 	@echo "$(GREEN)Запуск $(BINARY_NAME) в режиме разработки...$(NC)"
-	./$(BINARY_NAME)
-	@echo "$(CYAN)Ожидание запуска фоновых процессов...$(NC)"
-	sleep 1
-	@echo "$(CYAN)Проверка запущенных процессов:$(NC)"
-	ps -ax | grep -v grep | grep '$(BINARY_NAME)' --color=always
+	./$(BINARY_NAME) 2>/dev/null || true
 	@echo "$(CYAN)Просмотр логов:$(NC)"
-	$(BINARY_NAME) --log
+	./$(BINARY_NAME) --log 2>/dev/null || true
+	@echo "$(CYAN)Проверка запущенных процессов:$(NC)"
+	ps -ax | grep -v grep | grep '/$(BINARY_NAME)' --color=always
 
 clean-build: ## Удалить скомпилированный бинарный файл
 	@echo "$(YELLOW)Очистка сборки...$(NC)"
