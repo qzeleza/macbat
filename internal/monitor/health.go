@@ -63,19 +63,6 @@ func IsAppInstalled(log *logger.Logger) bool {
 		// В реальном приложении здесь можно было бы выйти: os.Exit(1)
 	}
 
-	if ok {
-		// Проверяем запущен ли агент
-		if IsAgentRunning(log) {
-			log.Debug("Агент запущен...")
-		} else {
-			log.Debug("Агент не запущен. Запуск...")
-			if err := loadAgent(log); err != nil {
-				log.Fatal(fmt.Sprintf("Ошибка во время загрузки агента: %v", err))
-				return false
-			}
-			return true
-		}
-	}
 	// Возвращаем результат проверки
 	return ok
 }
@@ -212,6 +199,12 @@ func IsAgentRunning(log *logger.Logger) bool {
 }
 
 // removeOldFiles удаляет старые файлы конфигурации и логов.
+//
+// Функция использует paths.LogPath() и paths.ErrorLogPath() для получения
+// путей к файлам, которые необходимо удалить.
+//
+// @param log *logger.Logger - логгер
+// @return error - ошибка, если удаление файла не удалось
 func removeOldFiles(log *logger.Logger) error {
 	filesToRemove := []string{
 		paths.LogPath(),
@@ -230,36 +223,86 @@ func removeOldFiles(log *logger.Logger) error {
 }
 
 // loadAgent является вспомогательной функцией для загрузки агента.
-func loadAgent(log *logger.Logger) error {
-	if state, err := LoadAgent(log); err != nil {
+// LoadAndEnableAgent загружает и подключает агента в системе launchd.
+//
+// Функция выполняет две основные операции: загрузку агента с помощью
+// команды "bootstrap" и его подключение с помощью команды "enable".
+// Ожидается, что агент будет успешно загружен и подключен, чтобы
+// обеспечивать свою работоспособность в системе.
+//
+// @param log *logger.Logger - логгер для записи сообщений о ходе выполнения
+//
+// @return error - ошибка, если не удалось загрузить или подключить агента
+func LoadAndEnableAgent(log *logger.Logger) error {
+	if state, err := CommandAgentService(log, "bootstrap"); err != nil {
 		if !state {
 			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
 			log.Error(mess)
 			return fmt.Errorf("%s", mess)
 		}
 	}
+	if state, err := CommandAgentService(log, "enable"); err != nil {
+		if !state {
+			mess := fmt.Sprintf("не удалось подключить агента: %v", err)
+			log.Error(mess)
+			return fmt.Errorf("%s", mess)
+		}
+	}
+	log.Debug("Агент успешно загружен и подключен.")
 	return nil
 }
 
-// LoadAgent загружает и активирует агент в системе launchd.
+// UnloadAndDisableAgent отключает и выгружает агент из launchd.
 //
-// Функция регистрирует агента в launchd, что позволяет ему автоматически
-// запускаться при загрузке системы и перезапускаться при сбоях.
+// Функция отключает и выгружает агент, если он запущен. Если агент не
+// запущен, функция просто возвращает true, не выполняя никаких действий.
 //
-// @return bool Флаг успешного выполнения операции
-// @return error Ошибка, если не удалось загрузить агента
-func LoadAgent(log *logger.Logger) (bool, error) {
-
-	if !IsAgentRunning(log) {
-		cmd := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
-		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
-			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
+// @param log *logger.Logger - логгер для записи сообщений о ходе выполнения
+//
+// @return error - ошибка, если не удалось отключить или выгрузить агента
+func UnloadAndDisableAgent(log *logger.Logger) error {
+	if state, err := CommandAgentService(log, "disable"); err != nil {
+		if !state {
+			mess := fmt.Sprintf("не удалось отключить агента: %v", err)
 			log.Error(mess)
-			return false, fmt.Errorf("%s", mess)
+			return fmt.Errorf("%s", mess)
 		}
-		cmd = exec.Command("launchctl", "enable", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
+	}
+	if state, err := CommandAgentService(log, "bootout"); err != nil {
+		if !state {
+			mess := fmt.Sprintf("не удалось выгрузить агента: %v", err)
+			log.Error(mess)
+			return fmt.Errorf("%s", mess)
+		}
+	}
+	log.Debug("Агент успешно выгружен и отключен.")
+	return nil
+}
+
+// ControlAgentService управляет состоянием агента в системе.
+//
+// Функция принимает 2 параметра: логгер для записи сообщений о ходе выполнения
+// и строку, указывающую на действие, которое нужно выполнить (например, "bootstrap"
+// или "bootout"). Если агент не запущен, функция выполняет команду launchctl
+// с указанным действием для изменения состояния агента в системе.
+// Если агент уже запущен, функция возвращает ошибку.
+//
+// @param log *logger.Logger - логгер для записи сообщений о ходе выполнения
+// @param action string - действие, которое нужно выполнить (например, "bootstrap"
+//
+//	или "bootout")
+//
+// @return bool true, если команда выполнена успешно, иначе false
+// @return error ошибка выполнения команды, если она произошла
+func ControlAgentService(log *logger.Logger, action string) (bool, error) {
+	if !IsAgentRunning(log) {
+		cmd := exec.Command("launchctl", action, fmt.Sprintf("gui/%d/%s", os.Getuid(), paths.AgentIdentifier()))
 		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
-			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
+			act := "загрузить"
+			if action == "disable" {
+				act = "выгрузить"
+			}
+			mess := fmt.Sprintf("не удалось %s агента: %v", act, err)
 			log.Error(mess)
 			return false, fmt.Errorf("%s", mess)
 		}
@@ -270,30 +313,31 @@ func LoadAgent(log *logger.Logger) (bool, error) {
 	return true, fmt.Errorf("%s", mess)
 }
 
-// UnloadAgent останавливает и выгружает агент из системы launchd.
+// CommandAgentService управляет состоянием агента в системе через launchctl.
 //
-// Функция останавливает выполнение агента и удаляет его из списка
-// автоматически запускаемых при загрузке системы.
+// Функция выполняет команду launchctl с указанным действием (например, "bootstrap" или "bootout")
+// для изменения состояния агента в системе. Это позволяет загружать или выгружать агента
+// в зависимости от переданного параметра action.
 //
-// @return bool Флаг успешного выполнения операции
-// @return error Ошибка, если не удалось выгрузить агента
-func UnloadAgent(log *logger.Logger) (bool, error) {
-	if IsAgentRunning(log) {
-		cmd := exec.Command("launchctl", "enable", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
-		if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
-			mess := fmt.Sprintf("не удалось загрузить агента: %v", err)
-			log.Error(mess)
-			return false, fmt.Errorf("%s", mess)
+// @param log *logger.Logger - логгер для записи сообщений о ходе выполнения
+// @param action string - действие, которое нужно выполнить (например, "bootstrap" или "bootout")
+//
+// @return bool true, если команда выполнена успешно, иначе false
+// @return error ошибка выполнения команды, если она произошла
+//
+// Примечания:
+// - Требует прав администратора
+// - Возвращает false и сообщение об ошибке, если служба не найдена
+func CommandAgentService(log *logger.Logger, action string) (bool, error) {
+	cmd := exec.Command("launchctl", action, fmt.Sprintf("gui/%d/%s", os.Getuid(), paths.AgentIdentifier()))
+	if err := cmd.Run(); err != nil && strings.Contains(err.Error(), "Could not find service") {
+		act := "bootstrap"
+		if action == "bootout" {
+			act = "bootout"
 		}
-		cmd = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), paths.PlistPath())
-		if err := cmd.Run(); err != nil && !strings.Contains(err.Error(), "Boot-out failed: 5: Input/output error") {
-			mess := fmt.Sprintf("не удалось выгрузить агент: %v", err)
-			log.Error(mess)
-			return false, fmt.Errorf("%s", mess)
-		}
-		return true, nil
+		mess := fmt.Sprintf("не удалось %s агента: %v", act, err)
+		log.Error(mess)
+		return false, fmt.Errorf("%s", mess)
 	}
-	mess := "Агент уже выгружен посредством launchctl"
-	log.Debug(mess)
-	return true, fmt.Errorf("%s", mess)
+	return true, nil
 }

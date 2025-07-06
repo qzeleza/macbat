@@ -71,12 +71,11 @@ func GetMaxLabelLength(labels []string) int {
 //
 // @param seconds Количество секунд
 // @return string Строка формата «1ч 23м 45с» либо «05м 12с»
-func FormatTimeToColonHMS(seconds int) string {
-	if seconds < 0 {
-		seconds = 0
+func FormatTimeToColonHMS(minutes int) string {
+	if minutes < 0 {
+		minutes = 0
 	}
-	h := seconds / 3600
-	m := (seconds % 3600) / 60
-	s := seconds % 60
-	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+	h := minutes / 60
+	m := minutes % 60
+	return fmt.Sprintf("%02dч %02dм", h, m)
 }

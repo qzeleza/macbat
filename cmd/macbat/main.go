@@ -160,8 +160,8 @@ func main() {
 			// но мы проверяем на всякий случай.
 			if !monitor.IsAgentRunning(log) {
 				log.Info("Агент не запущен. Попытка запуска...")
-				if _, err := monitor.LoadAgent(log); err != nil {
-					log.Error(fmt.Sprintf("Не удалось запустить агент: %v", err))
+				if err := monitor.LoadAndEnableAgent(log); err != nil {
+					log.Error(fmt.Sprintf("Не удалось запустить агента: %v", err))
 					return // Выходим, если не удалось запустить
 				}
 			}
@@ -170,7 +170,7 @@ func main() {
 		}
 
 		if err := bgManager.Run("--background", task); err != nil {
-			log.Error(fmt.Sprintf("Не удалось запустить фоновый процесс: %v", err))
+			log.Error(fmt.Sprintf("Не удалось запустить фоновый процесс --background: %v", err))
 		}
 		return
 	}

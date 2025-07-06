@@ -73,21 +73,23 @@ func (t *Tray) onReady() {
 	systray.SetTooltip("Управление macbat")
 
 	// --- Создание элементов меню ---
-
+	// Режим работы
 	t.mChargeMode = systray.AddMenuItem("Режим работы ...", "Текущий режим заряда")
+	systray.AddSeparator()
+
+	// --- Информационные пункты о времени зарядки/разрядки ---
+	// Текущий заряд батареи
+	t.mCurrent = systray.AddMenuItem("Загрузка...", "Текущий заряд батареи")
+	t.timeToFullCharge = systray.AddMenuItem("Время до полной зарядки ...", "Расчётное время до 100% заряда")
+	t.timeToEmptyCharge = systray.AddMenuItem("Время до полной разрядки ...", "Расчётное время до 0% заряда")
+	t.timeToEmptyCharge.Hide()
+	t.timeToFullCharge.Hide()
 
 	// --- Пункты настройки порогов ---
 	systray.AddSeparator()
 	t.mMin = systray.AddMenuItem("Мин. порог ...", "Установить минимальный порог")
 	t.mMax = systray.AddMenuItem("Макс. порог ...", "Установить максимальный порог")
 	systray.AddSeparator()
-
-	// --- Информационные пункты о времени зарядки/разрядки ---
-	t.mCurrent = systray.AddMenuItem("Загрузка...", "Текущий заряд батареи")
-	t.timeToFullCharge = systray.AddMenuItem("Время до полной зарядки ...", "Расчётное время до 100% заряда")
-	t.timeToEmptyCharge = systray.AddMenuItem("Время до полной разрядки ...", "Расчётное время до 0% заряда")
-	t.timeToEmptyCharge.Hide()
-	t.timeToFullCharge.Hide()
 
 	// --- Информационные пункты о состоянии батареи ---
 	systray.AddSeparator()
@@ -141,9 +143,11 @@ func (t *Tray) updateMenu() {
 	}
 
 	// Получаем строку для отображения режима зарядки
-	chargeModeStr := "Ноутбук работает от батареи 🪫"
+	chargeModeStr := "Ноутбук питается от батареи"
+	chargeModeIcon := "🪫"
 	if info.IsCharging {
-		chargeModeStr = "Ноутбук заряжается от сети 🔌"
+		chargeModeStr = "Ноутбук заряжаем от сети"
+		chargeModeIcon = "🔌"
 	}
 
 	// Получаем пороги из конфигурации
@@ -152,15 +156,15 @@ func (t *Tray) updateMenu() {
 
 	// Обновляем заголовок с иконкой батареи
 	icon := getBatteryIcon(info.CurrentCapacity, info.IsCharging)
-	t.mChargeMode.SetTitle(chargeModeStr)
+	t.mChargeMode.SetTitle(fmt.Sprintf("%-29s %-4s", chargeModeStr, chargeModeIcon))
 
-	t.mCurrent.SetTitle(fmt.Sprintf("%-30s %3d%% %s", "Текущий заряд", info.CurrentCapacity, icon))
+	t.mCurrent.SetTitle(fmt.Sprintf("%-29s %4d%%  %-4s", "Текущий заряд", info.CurrentCapacity, icon))
 	if info.IsCharging {
-		t.timeToFullCharge.SetTitle(fmt.Sprintf("%-26s %s", "До полного заряда", utils.FormatTimeToColonHMS(info.TimeToFull)))
+		t.timeToFullCharge.SetTitle(fmt.Sprintf("%-25s  %-5s", "До полного заряда", utils.FormatTimeToColonHMS(info.TimeToFull)))
 		t.timeToEmptyCharge.Hide()
 		t.timeToFullCharge.Show()
 	} else {
-		t.timeToEmptyCharge.SetTitle(fmt.Sprintf("%-27s %s", "До полного разряда", utils.FormatTimeToColonHMS(info.TimeToEmpty)))
+		t.timeToEmptyCharge.SetTitle(fmt.Sprintf("%-26s  %-5s", "До полного разряда", utils.FormatTimeToColonHMS(info.TimeToEmpty)))
 		t.timeToFullCharge.Hide()
 		t.timeToEmptyCharge.Show()
 	}
@@ -173,19 +177,19 @@ func (t *Tray) updateMenu() {
 	maxIndicator := getMaxThresholdIndicator(maxThreshold)
 
 	// Обновляем пункты меню
-	t.mMin.SetTitle(fmt.Sprintf("%-34s %3d%% %s", "Мин. порог", minThreshold, minIndicator))
-	t.mMax.SetTitle(fmt.Sprintf("%-33s %3d%% %s", "Макс. порог", maxThreshold, maxIndicator))
+	t.mMin.SetTitle(fmt.Sprintf("%-34s %4d%%  %s", "Мин. порог", minThreshold, minIndicator))
+	t.mMax.SetTitle(fmt.Sprintf("%-33s %4d%%  %s", "Макс. порог", maxThreshold, maxIndicator))
 
 	// Обновляем пункты меню
 	healthIndicator := getHealthIndicator(info.HealthPercent)
 	cyclesIndicator := getCyclesIndicator(info.CycleCount)
-	t.mCycles.SetTitle(fmt.Sprintf("%-32s %4d %s", "Циклов заряда", info.CycleCount, cyclesIndicator))
-	t.mHealth.SetTitle(fmt.Sprintf("%-28s %4d%% %s", "Здоровье батареи", info.HealthPercent, healthIndicator))
+	t.mCycles.SetTitle(fmt.Sprintf("%-32s %4d  %s", "Циклов заряда", info.CycleCount, cyclesIndicator))
+	t.mHealth.SetTitle(fmt.Sprintf("%-28s %4d%%  %s", "Здоровье батареи", info.HealthPercent, healthIndicator))
 
 	// Обновляем пункты меню
-	t.mCheckCharging.SetTitle(fmt.Sprintf("%-35s %3d с.", "Интервал проверки при зарядке", t.cfg.CheckIntervalWhenCharging))
-	t.mCheckDischarging.SetTitle(fmt.Sprintf("%-35s %3d с.", "Интервал проверки при разрядке", t.cfg.CheckIntervalWhenDischarging))
-	t.mMaxNotifications.SetTitle(fmt.Sprintf("%-44s %4d ув.", "Число уведомлений", t.cfg.MaxNotifications))
+	t.mCheckCharging.SetTitle(fmt.Sprintf("%-36s %4d с.", "Интервал проверки при зарядке", t.cfg.CheckIntervalWhenCharging))
+	t.mCheckDischarging.SetTitle(fmt.Sprintf("%-35s %4d с.", "Интервал проверки при разрядке", t.cfg.CheckIntervalWhenDischarging))
+	t.mMaxNotifications.SetTitle(fmt.Sprintf("%-45s %4d ув.", "Число уведомлений", t.cfg.MaxNotifications))
 }
 
 // getMinThresholdIndicator возвращает цветной индикатор для минимального порога.
@@ -323,8 +327,8 @@ func (t *Tray) handleMenuClicks(mSettings, mLogs, mConfig, mQuit *systray.MenuIt
 			} else if confirmed {
 				t.log.Info("Получен сигнал на выход. Завершение работы.")
 				t.bgManager.Kill("--background")
-				if _, err := monitor.UnloadAgent(t.log); err != nil {
-					dlgs.Error("Ошибка", "Не удалось удалить агента: "+err.Error())
+				if _, err := monitor.CommandAgentService(t.log, "bootout"); err != nil {
+					dlgs.Error("Ошибка", "Не удалось выгрузить агента: "+err.Error())
 				}
 				systray.Quit()
 				return

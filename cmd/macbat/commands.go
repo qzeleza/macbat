@@ -38,38 +38,29 @@ func Install(log *logger.Logger, cfg *config.Config) error {
 		return err
 	}
 
-	// Создаем директорию для бинарника
-	// if err := createBinaryDirectory(binDir, log); err != nil {
-	// 	return err
-	// }
-
-	// Проверяем права на запись
-	// if err := utils.CheckWriteAccess(binDir, log); err != nil {
-	// 	mess := fmt.Sprintf("нет прав на запись в %s: %v", binDir, err)
-	// 	log.Error(mess)
-	// 	return fmt.Errorf("%s", mess)
-	// }
-
-	// // Копируем бинарник
-	// if err := copyBinary(currentBin, binPath, log); err != nil {
-	// 	return err
-	// }
-
 	// Добавляем директорию в PATH
 	addPathToEnvironment(binDir, log)
 
-	// 3. Создаем plist файл для агента
+	// Создаем plist файл для агента
 	if err := createPlistFile(binPath, log, cfg); err != nil {
 		return fmt.Errorf("не удалось создать plist: %w", err)
 	}
 
-	// Загружаем агента при помощи launchd
-	if ok, err := monitor.LoadAgent(log); !ok {
-		return fmt.Errorf("не удалось загрузить агент: %w", err)
+	// Отключаем и выгружаем агента
+	if err := monitor.UnloadAndDisableAgent(log); err != nil {
+		log.Error(fmt.Sprintf("Ошибка отключения агента: %v", err))
 	}
+	// Включаем и загружаем агента
+	if err := monitor.LoadAndEnableAgent(log); err != nil {
+		log.Error(fmt.Sprintf("Ошибка включения агента: %v", err))
+	}
+
 	return nil
 }
 
+// createLogDirectory создает директорию для логов, если она не существует.
+// @param log *logger.Logger - логгер для вывода отладочной информации.
+// @return error - ошибка, если не удалось создать директорию
 func createLogDirectory(log *logger.Logger) error {
 	logDir := filepath.Dir(paths.LogPath())
 	log.Debug(fmt.Sprintf("Создание директории для логов: %s", logDir))
@@ -81,32 +72,19 @@ func createLogDirectory(log *logger.Logger) error {
 	return nil
 }
 
-// func createBinaryDirectory(binDir string, log *logger.Logger) error {
-// 	if err := os.MkdirAll(binDir, 0755); err != nil {
-// 		mess := fmt.Sprintf("не удалось создать директорию %s: %v", binDir, err)
-// 		log.Error(mess)
-// 		return fmt.Errorf("%s", mess)
-// 	}
-// 	return nil
-// }
-
-// func copyBinary(currentBin, binPath string, log *logger.Logger) error {
-// 	log.Debug(fmt.Sprintf("Копирование бинарника из %s в %s", currentBin, binPath))
-// 	data, err := os.ReadFile(currentBin)
-// 	if err != nil {
-// 		mess := fmt.Sprintf("не удалось прочитать бинарник: %v", err)
-// 		log.Error(mess)
-// 		return fmt.Errorf("%s", mess)
-// 	}
-// 	if err := os.WriteFile(binPath, data, 0755); err != nil {
-// 		mess := fmt.Sprintf("не удалось записать бинарник в %s: %v", binPath, err)
-// 		log.Error(mess)
-// 		return fmt.Errorf("%s", mess)
-// 	}
-// 	log.Debug(fmt.Sprintf("Бинарник успешно записан: %s", binPath))
-// 	return nil
-// }
-
+// addPathToEnvironment добавляет указанную директорию в переменную PATH.
+//
+// Функция сначала пытается добавить директорию в системную переменную PATH,
+// используя внутrenний метод AddToPath. Если добавление не удается,
+// это регистрируется как предупреждение, и пользователю предлагается
+// выполнить команду вручную для добавления директории в PATH.
+// После успешного добавления функция пытается обновить текущую сессию оболочки
+// с помощью внутреннего метода UpdateShell. Если обновление не удается,
+// это также регистрируется как предупреждение, и пользователю предлагается
+// выполнить команду вручную для обновления PATH в текущей сессии.
+//
+// @param binDir string - Директория, которую нужно добавить в PATH.
+// @param log *logger.Logger - Логгер для записи сообщений о ходе выполнения.
 func addPathToEnvironment(binDir string, log *logger.Logger) {
 	if err := env.AddToPath(binDir, log); err != nil {
 		// Не считаем это фатальной ошибкой, продолжаем установку
@@ -231,13 +209,11 @@ func Uninstall(log *logger.Logger, cfg *config.Config) error {
 	binDir := paths.BinaryPath()
 
 	// Выгружаем агент
-	log.Info("Выгрузка агента...")
-	if ok, err := monitor.UnloadAgent(log); !ok {
-		mess := fmt.Sprintf("Ошибка выгрузки агента: %v", err)
-		log.Error(mess)
-		// Не возвращаем ошибку, чтобы не прерывать удаление
-	} else {
-		log.Info("Агент успешно выгружен")
+	log.Info("Отключение агента...")
+
+	// Отключаем и выгружаем агента
+	if err := monitor.UnloadAndDisableAgent(log); err != nil {
+		log.Error(fmt.Sprintf("Ошибка отключения агента: %v", err))
 	}
 
 	// Удаляем директорию из PATH
@@ -250,6 +226,18 @@ func Uninstall(log *logger.Logger, cfg *config.Config) error {
 	return nil
 }
 
+// removePathFromEnvironment удаляет указанную директорию из переменной PATH.
+//
+// Функция сначала пытается удалить директорию из системной переменной PATH,
+// используя внутренний метод RemoveFromPath. Если удаление не удается,
+// это регистрируется как предупреждение и выполнение продолжается.
+// После успешного удаления функция пытается обновить текущую сессию оболочки
+// с помощью внутреннего метода UpdateShell. Если обновление не удается,
+// это также регистрируется как предупреждение, и пользователю предлагается
+// выполнить команду вручную для обновления PATH в текущей сессии.
+//
+// @param binDir string - Директория, которую нужно удалить из PATH.
+// @param log *logger.Logger - Логгер для записи сообщений о ходе выполнения.
 func removePathFromEnvironment(binDir string, log *logger.Logger) {
 	if err := env.RemoveFromPath(binDir, log); err != nil {
 		// Не считаем это фатальной ошибкой, продолжаем удаление
@@ -266,6 +254,12 @@ func removePathFromEnvironment(binDir string, log *logger.Logger) {
 	}
 }
 
+// removeAllFiles удаляет все файлы, используемые приложением.
+//
+// Функция удаляет файлы, созданные приложением, включая бинарник,
+// файл конфигурации, лог-файлы, файл plist и PID-файлы.
+//
+// @param log *logger.Logger - логгер
 func removeAllFiles(log *logger.Logger) {
 	paths := []string{
 		paths.BinaryPath(),
