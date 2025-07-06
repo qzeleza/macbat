@@ -3,11 +3,12 @@ package monitor
 import (
 	"bufio"
 	"fmt"
-	"macbat/internal/logger"
-	"macbat/internal/paths"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/qzeleza/macbat/internal/logger"
+	"github.com/qzeleza/macbat/internal/paths"
 )
 
 // IsAppInstalled проверяет, корректно ли установлено приложение, включая все его компоненты.

@@ -72,10 +72,10 @@ import (
 	"fmt"
 	"time"
 
-	"macbat/internal/battery"
-	"macbat/internal/config"
-	"macbat/internal/dialog"
-	"macbat/internal/logger"
+	"github.com/qzeleza/macbat/internal/battery"
+	"github.com/qzeleza/macbat/internal/config"
+	"github.com/qzeleza/macbat/internal/dialog"
+	"github.com/qzeleza/macbat/internal/logger"
 )
 
 //================================================================================

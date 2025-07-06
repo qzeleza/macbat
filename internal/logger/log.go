@@ -6,11 +6,12 @@ package logger
 import (
 	"fmt"
 	"log"
-	"macbat/internal/paths"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/qzeleza/macbat/internal/paths"
 )
 
 //================================================================================

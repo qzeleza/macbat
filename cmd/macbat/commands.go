@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
-	"macbat/internal/background"
-	"macbat/internal/config"
-	"macbat/internal/env"
-	"macbat/internal/logger"
-	"macbat/internal/monitor"
-	"macbat/internal/paths"
-	"macbat/internal/utils"
 	"os"
 	"path/filepath"
+
+	"github.com/qzeleza/macbat/internal/background"
+	"github.com/qzeleza/macbat/internal/config"
+	"github.com/qzeleza/macbat/internal/env"
+	"github.com/qzeleza/macbat/internal/logger"
+	"github.com/qzeleza/macbat/internal/monitor"
+	"github.com/qzeleza/macbat/internal/paths"
+	"github.com/qzeleza/macbat/internal/utils"
 )
 
 // Install устанавливает приложение и регистрирует его как агент launchd.

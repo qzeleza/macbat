@@ -3,10 +3,11 @@ package dialog
 import (
 	"context"
 	"fmt"
-	"macbat/internal/logger"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/qzeleza/macbat/internal/logger"
 )
 
 /**

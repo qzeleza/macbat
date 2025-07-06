@@ -7,11 +7,12 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"macbat/internal/logger" // Предполагается, что у вас есть такой логгер
-	"macbat/internal/paths"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/qzeleza/macbat/internal/logger" // Предполагается, что у вас есть такой логгер
+	"github.com/qzeleza/macbat/internal/paths"
 )
 
 // NotificationState содержит состояние уведомлений.

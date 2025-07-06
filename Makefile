@@ -18,17 +18,24 @@ COVERAGE_HTML = coverage.html
 BINARY_NAME=macbat
 MAIN_PATH=./cmd/macbat
 
+# Файл скрипта для авто-инкремента номера сборки
+BUILD_SCRIPT = ./scripts/update_build_number.sh
+
 # Информация о версии, получаемая из Git.
 # Получаем последний тег. Если тегов нет, используется 'dev'.
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
 COMMIT_HASH ?= $(shell git rev-parse --short HEAD)
 BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 
+# Получаем номер сборки (скрипт обновляет внутренний счётчик)
+BUILD_NUMBER := $(shell bash $(BUILD_SCRIPT) $(VERSION))
+
 # Флаги компоновщика для внедрения информации о версии в бинарный файл.
 LDFLAGS = -ldflags="\
     -X 'macbat/internal/version.Version=$(VERSION)' \
     -X 'macbat/internal/version.CommitHash=$(COMMIT_HASH)' \
-    -X 'macbat/internal/version.BuildDate=$(BUILD_DATE)'"
+    -X 'macbat/internal/version.BuildDate=$(BUILD_DATE)' \
+    -X 'macbat/internal/version.BuildNumber=$(BUILD_NUMBER)'"
 
 # Находим файлы test_*.go
 TEST_PREFIX_FILES = $(shell find . -name "test_*.go" -type f)
@@ -49,7 +56,8 @@ build: ## Собрать бинарный файл с информацией о 
 	@echo "  Версия: $(VERSION)"
 	@echo "  Коммит: $(COMMIT_HASH)"
 	@echo "  Дата: $(BUILD_DATE)"
-	go build $(LDFLAGS) -o $(BINARY_NAME) $(MAIN_PATH)
+	@echo "  Номер сборки: $(BUILD_NUMBER)"
+	CGO_ENABLED=1 go build $(LDFLAGS) -o $(BINARY_NAME) $(MAIN_PATH)
 	@echo "$(GREEN)Сборка завершена: ./$(BINARY_NAME)$(NC)"
 
 run: build ## Собрать и запустить приложение для разработки
@@ -57,11 +65,21 @@ run: build ## Собрать и запустить приложение для �
 	launchctl unload -w $(HOME)/Library/LaunchAgents/com.macbat.agent.plist 2>/dev/null || true
 	killall $(BINARY_NAME) 2>/dev/null || true
 	@echo "$(GREEN)Запуск $(BINARY_NAME) в режиме разработки...$(NC)"
-	./$(BINARY_NAME) 2>/dev/null || true
+	./$(BINARY_NAME)
 	@echo "$(CYAN)Просмотр логов:$(NC)"
-	./$(BINARY_NAME) --log 2>/dev/null || true
+	./$(BINARY_NAME) --log 
 	@echo "$(CYAN)Проверка запущенных процессов:$(NC)"
 	ps -ax | grep -v grep | grep '/$(BINARY_NAME)' --color=always
+
+release: clean
+	@echo "$(YELLOW)Сборка $(BINARY_NAME) для релиза...$(NC)"
+	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/$(BINARY_NAME)
+	@echo "$(GREEN)Сборка завершена: ./$(BINARY_NAME)$(NC)"
+
+install: clean release
+	@echo "$(YELLOW)Установка $(BINARY_NAME) в /usr/local/bin...$(NC)"
+	@cp ./$(BINARY_NAME) /usr/local/bin/
+	@echo "$(GREEN)Установка завершена.$(NC)"
 
 clean-build: ## Удалить скомпилированный бинарный файл
 	@echo "$(YELLOW)Очистка сборки...$(NC)"
@@ -69,127 +87,66 @@ clean-build: ## Удалить скомпилированный бинарный
 	@echo "$(GREEN)Очистка завершена.$(NC)"
 
 help: ## Показать справку по командам
-	@echo "$(GREEN)MacBat Test Makefile$(NC)"
+    @echo "$(GREEN)MacBat Makefile$(NC)"
+    @echo ""
+    # Авто-генерируем список целей с описаниями
+    @grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+        awk 'BEGIN {FS=":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+    @echo ""
+    @echo "$(CYAN)Часто используемые цели:$(NC)"
+    @echo "  $(GREEN)make run$(NC)       – сборка и запуск приложения"
+    @echo "  $(GREEN)make release$(NC)   – сборка релизного бинарника"
+    @echo "  $(GREEN)make install$(NC)   – установка бинарника в /usr/local/bin"
+    @echo "  $(GREEN)make clean$(NC)     – полная очистка артефактов"
+    @echo "  $(GREEN)make test$(NC)      – запуск всех тестов"
+    @echo "  $(GREEN)make info$(NC)      – информация о проекте"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
+	@echo "$(CYAN)Дополнительные цели:$(NC)"
+	@echo "  $(GREEN)make deps$(NC)      – установка зависимостей"
+	@echo "  $(GREEN)make quick$(NC)     – быстрая проверка"
+	@echo "  $(GREEN)make dev$(NC)       – разработка"
+	@echo "  $(GREEN)make fmt$(NC)       – форматирование кода"
+	@echo "  $(GREEN)make vet$(NC)       – проверка кода"
+	@echo "  $(GREEN)make test-fixed$(NC) – запуск исправленных тестов"
+	@echo "  $(GREEN)make test-unit$(NC)  – запуск unit тестов"
+	@echo "  $(GREEN)make test-coverage$(NC) – тесты с отчетом о покрытии"
+	@echo "  $(GREEN)make test-race$(NC)   – тесты с проверкой гонок"
+	@echo "  $(GREEN)make test-specific TEST=X$(NC) – запуск конкретного теста"
 	@echo ""
-	@echo "$(YELLOW)📁 Найдено файлов test_*.go: $(shell echo '$(TEST_PREFIX_FILES)' | wc -w)$(NC)"
-	@echo ""
-	@echo "$(BLUE)🔧 РЕШЕНИЯ ПРОБЛЕМЫ:$(NC)"
-	@echo "  $(GREEN)make rename-to-standard$(NC)   - Переименовать test_*.go → *_test.go (рекомендуется)"
-	@echo "  $(GREEN)make test$(NC)                - Создать ссылки и запустить тесты"
-	@echo "  $(GREEN)make restore-from-standard$(NC) - Вернуть *_test.go → test_*.go"
+	@echo "$(CYAN)Дополнительные цели:$(NC)"
+	@echo "  $(GREEN)make profile-cpu$(NC) – CPU профилирование"
+	@echo "  $(GREEN)make profile-mem$(NC) – профилирование памяти"
 
-check-test-files: ## Проверить найденные файлы тестов
-	@echo "$(GREEN)Проверка структуры тестов:$(NC)"
-	@echo ""
-	@echo "$(YELLOW)Файлы test_*.go (не стандартные):$(NC)"
+
+# УТИЛИТЫ
+clean: clean-build cleanup-links ## Очистка
+	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML) *.prof
+	@rm -rf .makefile_backup .makefile_links
+	@go clean -testcache
+
+deps: ## Зависимости
+	@go mod download && go mod tidy
+
+quick: fmt vet test ## Быстрая проверка
+
+dev: quick test-race ## Разработка
+
+info: ## Информация о проекте
+	@echo "$(GREEN)MacBat проект:$(NC)"
+	@echo "  Go: $$(go version | awk '{print $$3}')"
+	@echo "  Файлы test_*.go: $(shell echo '$(TEST_PREFIX_FILES)' | wc -w)"
+	@echo "  Стандартные *_test.go: $(shell find . -name '*_test.go' | wc -l)"
 	@if [ -n "$(TEST_PREFIX_FILES)" ]; then \
+		total=0; \
 		for file in $(TEST_PREFIX_FILES); do \
-			echo "  ⚠️  $$file"; \
-			echo "      Пакет: $$(head -1 $$file | awk '{print $$2}')"; \
-			echo "      Тестов: $$(grep -c '^func Test' $$file 2>/dev/null || echo 0)"; \
-			dir=$$(dirname $$file); \
-			base=$$(basename $$file .go); \
-			standard_name="$${base#test_}_test.go"; \
-			echo "      Должен быть: $$dir/$$standard_name"; \
+			count=$$(grep -c '^func Test' $$file 2>/dev/null || echo 0); \
+			total=$$((total + count)); \
 		done; \
-	else \
-		echo "  ✅ Не найдены"; \
-	fi
-	@echo ""
-	@echo "$(YELLOW)Стандартные *_test.go файлы:$(NC)"
-	@find . -name "*_test.go" -type f | sed 's/^/  ✅ /' || echo "  ❌ Не найдены"
-	@echo ""
-	@echo "$(BLUE)💡 РЕКОМЕНДАЦИЯ: Используйте 'make rename-to-standard' для соответствия стандартам Go$(NC)"
-
-rename-to-standard: ## Переименовать test_*.go в *_test.go (РЕКОМЕНДУЕТСЯ)
-	@echo "$(YELLOW)⚠️  Переименование файлов test_*.go в стандартные *_test.go$(NC)"
-	@echo "$(YELLOW)Это изменит структуру файлов. Продолжить? (y/N)$(NC)"
-	@read -r confirm; \
-	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
-		if [ -n "$(TEST_PREFIX_FILES)" ]; then \
-			echo "$(GREEN)Переименовываем файлы...$(NC)"; \
-			mkdir -p .makefile_backup; \
-			for file in $(TEST_PREFIX_FILES); do \
-				dir=$$(dirname "$$file"); \
-				base=$$(basename "$$file" .go); \
-				new_name="$${base#test_}_test.go"; \
-				new_path="$$dir/$$new_name"; \
-				echo "  $$file → $$new_path"; \
-				if [ -f "$$new_path" ]; then \
-					echo "    ⚠️  $$new_path уже существует, создаем резерв"; \
-					cp "$$new_path" ".makefile_backup/$$(basename $$new_path).backup"; \
-				fi; \
-				mv "$$file" "$$new_path"; \
-				echo "$$file|$$new_path" >> .makefile_backup/renames.log; \
-			done; \
-			echo "$(GREEN)✅ Переименование завершено. Теперь можно использовать 'go test' стандартно$(NC)"; \
-			echo "$(BLUE)Для отката: make restore-from-standard$(NC)"; \
-		else \
-			echo "$(YELLOW)Файлы test_*.go не найдены$(NC)"; \
-		fi; \
-	else \
-		echo "$(YELLOW)Отменено$(NC)"; \
+		echo "  Функций Test*: $$total"; \
 	fi
 
-restore-from-standard: ## Восстановить test_*.go из *_test.go
-	@if [ -f .makefile_backup/renames.log ]; then \
-		echo "$(GREEN)Восстановление оригинальных имен...$(NC)"; \
-		while IFS='|' read -r original new; do \
-			if [ -f "$$new" ]; then \
-				echo "  $$new → $$original"; \
-				mv "$$new" "$$original"; \
-			fi; \
-		done < .makefile_backup/renames.log; \
-		if [ -d .makefile_backup ]; then \
-			for backup in .makefile_backup/*.backup; do \
-				if [ -f "$$backup" ]; then \
-					original_name=$$(basename "$$backup" .backup); \
-					cp "$$backup" "./internal/battery/$$original_name" 2>/dev/null || true; \
-				fi; \
-			done; \
-		fi; \
-		rm -rf .makefile_backup; \
-		echo "$(GREEN)✅ Восстановление завершено$(NC)"; \
-	else \
-		echo "$(YELLOW)Нет данных для восстановления$(NC)"; \
-	fi
 
-setup-links: ## Создать символические ссылки для тестов
-	@echo "$(GREEN)Создание символических ссылок...$(NC)"
-	@if [ -n "$(TEST_PREFIX_FILES)" ]; then \
-		mkdir -p .makefile_links; \
-		for file in $(TEST_PREFIX_FILES); do \
-			dir=$$(dirname "$$file"); \
-			base=$$(basename "$$file" .go); \
-			new_name="$${base#test_}_test.go"; \
-			link_path="$$dir/$$new_name"; \
-			if [ -f "$$link_path" ]; then \
-				echo "  ⚠️  $$link_path уже существует, пропускаем"; \
-			else \
-				echo "  $$file → $$link_path (ссылка)"; \
-				ln -sf "$$(basename $$file)" "$$link_path"; \
-				echo "$$link_path" >> .makefile_links/created.txt; \
-			fi; \
-		done; \
-		echo "$(GREEN)✅ Ссылки созданы$(NC)"; \
-	else \
-		echo "$(YELLOW)Файлы test_*.go не найдены$(NC)"; \
-	fi
 
-cleanup-links: ## Удалить созданные символические ссылки
-	@if [ -f .makefile_links/created.txt ]; then \
-		echo "$(GREEN)Удаление символических ссылок...$(NC)"; \
-		while read -r link; do \
-			if [ -L "$$link" ]; then \
-				echo "  Удаляем $$link"; \
-				rm "$$link"; \
-			fi; \
-		done < .makefile_links/created.txt; \
-		rm -rf .makefile_links; \
-		echo "$(GREEN)✅ Ссылки удалены$(NC)"; \
-	fi
 
 # ОСНОВНЫЕ КОМАНДЫ ТЕСТИРОВАНИЯ
 test: ## Запустить все тесты (через ссылки)
@@ -322,31 +279,5 @@ fmt: ## Форматирование
 vet: ## Проверка кода  
 	@go vet $(PACKAGE)
 
-# УТИЛИТЫ
-clean: cleanup-links ## Очистка
-	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML) *.prof
-	@rm -rf .makefile_backup .makefile_links
-	@go clean -testcache
-
-deps: ## Зависимости
-	@go mod download && go mod tidy
-
-quick: fmt vet test ## Быстрая проверка
-
-dev: quick test-race ## Разработка
-
-info: ## Информация о проекте
-	@echo "$(GREEN)MacBat проект:$(NC)"
-	@echo "  Go: $$(go version | awk '{print $$3}')"
-	@echo "  Файлы test_*.go: $(shell echo '$(TEST_PREFIX_FILES)' | wc -w)"
-	@echo "  Стандартные *_test.go: $(shell find . -name '*_test.go' | wc -l)"
-	@if [ -n "$(TEST_PREFIX_FILES)" ]; then \
-		total=0; \
-		for file in $(TEST_PREFIX_FILES); do \
-			count=$$(grep -c '^func Test' $$file 2>/dev/null || echo 0); \
-			total=$$((total + count)); \
-		done; \
-		echo "  Функций Test*: $$total"; \
-	fi
 
 .DEFAULT_GOAL := help

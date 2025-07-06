@@ -15,14 +15,15 @@ package background
 
 import (
 	"fmt"
-	"macbat/internal/logger"
-	"macbat/internal/paths"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"syscall"
+
+	"github.com/qzeleza/macbat/internal/logger"
+	"github.com/qzeleza/macbat/internal/paths"
 )
 
 // Manager управляет фоновыми процессами, обеспечивая их уникальность с помощью lock-файлов.

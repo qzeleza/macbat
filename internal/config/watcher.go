@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"macbat/internal/logger"
+	"github.com/qzeleza/macbat/internal/logger"
 
 	"github.com/fsnotify/fsnotify"
 )

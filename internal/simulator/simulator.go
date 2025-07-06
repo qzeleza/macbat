@@ -2,8 +2,9 @@ package simulator
 
 import (
 	"fmt"
-	"macbat/internal/battery"
-	"macbat/internal/logger"
+
+	"github.com/qzeleza/macbat/internal/battery"
+	"github.com/qzeleza/macbat/internal/logger"
 )
 
 //================================================================================

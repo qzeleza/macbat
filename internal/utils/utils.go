@@ -2,10 +2,11 @@ package utils
 
 import (
 	"fmt"
-	"macbat/internal/logger"
 	"os"
 	"path/filepath"
 	"unicode/utf8"
+
+	"github.com/qzeleza/macbat/internal/logger"
 )
 
 // CheckWriteAccess проверяет доступность директории для записи.

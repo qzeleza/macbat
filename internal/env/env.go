@@ -2,11 +2,12 @@ package env
 
 import (
 	"fmt"
-	"macbat/internal/logger"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/qzeleza/macbat/internal/logger"
 )
 
 // addToPath добавляет директорию в переменную PATH в файле конфигурации оболочки

@@ -1,4 +1,4 @@
-module macbat
+module github.com/qzeleza/macbat
 
 go 1.24.4
 

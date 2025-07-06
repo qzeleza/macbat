@@ -3,17 +3,18 @@ package main
 import (
 	"flag"
 	"fmt"
-	"macbat/internal/background"
-	"macbat/internal/config"
-	"macbat/internal/logger"
-	"macbat/internal/monitor"
-	"macbat/internal/paths"
-	"macbat/internal/tray"
-	"macbat/internal/version"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/qzeleza/macbat/internal/background"
+	"github.com/qzeleza/macbat/internal/config"
+	"github.com/qzeleza/macbat/internal/logger"
+	"github.com/qzeleza/macbat/internal/monitor"
+	"github.com/qzeleza/macbat/internal/paths"
+	"github.com/qzeleza/macbat/internal/tray"
+	"github.com/qzeleza/macbat/internal/version"
 
 	"golang.org/x/term"
 )
@@ -78,7 +79,7 @@ func main() {
 
 	// --- Вывод версии приложения ---
 	if *versionFlag {
-		fmt.Printf("Версия macbat: %s\nХеш коммита: %s\nДата сборки: %s\n", version.Version, version.CommitHash, version.BuildDate)
+		fmt.Printf("%s", version.GetVersion())
 		return
 	}
 
@@ -154,6 +155,7 @@ func main() {
 		}
 
 		// Если мы здесь, значит процесс уже отсоединен от терминала
+		log.Line()
 		log.Info("Запускаем основную задачу мониторинга в фоновом режиме...")
 		task := func() {
 			// В фоновом режиме агент должен быть уже запущен через launchd,
