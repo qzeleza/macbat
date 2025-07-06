@@ -62,3 +62,6 @@ local.*
 *.njsproj
 *.sln
 *.sw?
+
+# TASK AI
+*.ai
