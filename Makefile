@@ -1,6 +1,3 @@
-
-
-
 # Makefile для тестирования модуля батареи MacBat
 # РАБОЧАЯ ВЕРСИЯ - правильная работа с test_*.go
 
@@ -29,13 +26,18 @@ BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 
 # Получаем номер сборки (скрипт обновляет внутренний счётчик)
 BUILD_NUMBER := $(shell bash $(BUILD_SCRIPT) $(VERSION))
+# Добавляем номер сборки к версии
+VERSION := $(VERSION)+$(BUILD_NUMBER)
+
+# Путь модуля
+MODULE_PATH = github.com/qzeleza/macbat
 
 # Флаги компоновщика для внедрения информации о версии в бинарный файл.
 LDFLAGS = -ldflags="\
-    -X 'macbat/internal/version.Version=$(VERSION)' \
-    -X 'macbat/internal/version.CommitHash=$(COMMIT_HASH)' \
-    -X 'macbat/internal/version.BuildDate=$(BUILD_DATE)' \
-    -X 'macbat/internal/version.BuildNumber=$(BUILD_NUMBER)'"
+    -X '$(MODULE_PATH)/internal/version.Version=$(VERSION)' \
+    -X '$(MODULE_PATH)/internal/version.CommitHash=$(COMMIT_HASH)' \
+    -X '$(MODULE_PATH)/internal/version.BuildDate=$(BUILD_DATE)' \
+    -X '$(MODULE_PATH)/internal/version.BuildNumber=$(BUILD_NUMBER)'"
 
 # Находим файлы test_*.go
 TEST_PREFIX_FILES = $(shell find . -name "test_*.go" -type f)
@@ -50,6 +52,43 @@ NC = \033[0m
 all: test
 
 # --- Цели для сборки ---
+# --- Настройки GitHub ---
+REPO          = qzeleza/macbat          # owner/repo на GitHub
+GH            ?= gh                     # GitHub CLI
+RELEASE_TITLE ?= "MacBat $(VERSION)"
+
+# Цель: publish – полный цикл публикации релиза на GitHub
+# 1. Сборка релизного бинарника (make release)
+# 2. Создание тега версии и пуш в origin
+# 3. Создание релиза через gh cli и загрузка бинарника
+# 4. Формирование tar.gz исходников, вычисление sha256
+# 5. Обновление Homebrew formula macbat.rb (version + sha256)
+# 6. Коммит formula и пуш в origin
+# Требования: установлен GitHub CLI (`gh`) и переменная окружения GH_TOKEN с правами на репозиторий.
+publish: release ## Сформировать релиз, выложить на GitHub и обновить Homebrew formula
+    @echo "$(YELLOW)▶️  Публикация релиза $(VERSION)$(NC)"
+    @if ! $(GH) auth status >/dev/null 2>&1; then \
+        echo "$(RED)🔑 GH CLI не авторизован. Выполните 'gh auth login' или задайте GH_TOKEN$(NC)"; exit 1; fi
+    # --- Git tag ---
+    @git tag -a $(VERSION) -m "Публикация релиза $(VERSION)" || true
+    @git push origin $(VERSION)
+    # --- GitHub release ---
+    $(GH) release create $(VERSION) ./$(BINARY_NAME) \
+      --repo $(REPO) \
+      --title $(RELEASE_TITLE) \
+      --notes "Автоматический релиз $(VERSION), build $(BUILD_NUMBER)"
+    # --- Source tarball & sha256 ---
+    @git archive --format=tar.gz --prefix=macbat-$(VERSION)/ $(VERSION) -o macbat-$(VERSION).tar.gz
+    @SHA=$$(shasum -a 256 macbat-$(VERSION).tar.gz | awk '{print $$1}'); \
+        sed -i '' -e "s/^  url \\".*\\"/  url \"https:\/\/github.com\/$(REPO)\/archive\/refs\/tags\/$(VERSION).tar.gz\"/" macbat.rb; \
+        sed -i '' -e "s/^  version \".*\"/  version \"$(VERSION)\"/" macbat.rb; \
+        sed -i '' -e "s/^  sha256 \".*\"/  sha256 \"$$SHA\"/" macbat.rb; \
+        echo "$(GREEN)Формула macbat.rb обновлена (sha256=$$SHA)$(NC)";
+    # --- Commit formula ---
+    @git add macbat.rb
+    @git commit -m "brew formula: update to $(VERSION) ($$SHA)" || true
+    @git push origin HEAD
+    @echo "$(GREEN)✅ Релиз $(VERSION) опубликован$(NC)"
 
 build: ## Собрать бинарный файл с информацией о версии
 	@echo "$(GREEN)Сборка $(BINARY_NAME)...$(NC)"
@@ -61,8 +100,7 @@ build: ## Собрать бинарный файл с информацией о 
 	@echo "$(GREEN)Сборка завершена: ./$(BINARY_NAME)$(NC)"
 
 run: build ## Собрать и запустить приложение для разработки
-	@echo "$(YELLOW)Остановка и выгрузка системного агента для чистого запуска...$(NC)"
-	launchctl unload -w $(HOME)/Library/LaunchAgents/com.macbat.agent.plist 2>/dev/null || true
+	@echo "$(YELLOW)Удаляем запущенные процессы $(BINARY_NAME)...$(NC)"
 	killall $(BINARY_NAME) 2>/dev/null || true
 	@echo "$(GREEN)Запуск $(BINARY_NAME) в режиме разработки...$(NC)"
 	./$(BINARY_NAME)
