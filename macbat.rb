@@ -1,43 +1,23 @@
-# macbat.rb
-
 class Macbat < Formula
-  desc "Утилита для мониторинга и управления зарядом батареи на ноутбуках с macOS"
-  homepage "https://github.com/zeleza/macbat"
-  url "https://github.com/zeleza/macbat/archive/refs/tags/v2.1.0.tar.gz"
-  version "2.1.1"
-  sha256 "6c11ade9dfecea6866513b5874a20678961c32be073b06c12253262f82055149"
-  license "Apache-2.0"
-  head "https://github.com/zeleza/macbat.git", branch: "main"
+  desc "Утилита мониторинга аккумулятора (binary)"
+  homepage "https://github.com/qzeleza/macbat"
+  version "v2.1.2"
 
-  # Зависимости для сборки
-  depends_on "go" => :build
-  depends_on xcode: :build  # Необходимо для CGO
-
-  def install
-    # Встраивание версии и даты сборки
-    ldflags = %W[
-      -s -w
-      -X github.com/zeleza/macbat/internal/version.Version=#{version}
-      -X github.com/zeleza/macbat/internal/version.BuildDate=#{time.iso8601}
-    ]
-    
-    # Сборка из cmd/macbat
-    system "go", "build", "-ldflags", ldflags.join(" "), 
-           "-o", bin/"macbat", "./cmd/macbat"
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/qzeleza/macbat/releases/download/v2.1.2/macbat-darwin-arm64.tar.gz"
+      sha256 "8cf366f25f46903917ffc9399dfe2ee9779d60bd30ef993c8aaefb29aa9d78e2"
+    else
+      url "https://github.com/qzeleza/macbat/releases/download/v2.1.2/macbat-darwin-amd64.tar.gz"
+      sha256 "8245ca21fb992581cc50378b5818aed168c0f3d5abfada1a774511a76317ec42"
+    end
   end
 
-  def caveats
-    <<~EOS
-      Приложение macbat требует macOS и может потребовать дополнительных разрешений для мониторинга батареи.
-      Вам может потребоваться предоставить доступ к приложению в System Preferences.
-    EOS
+  def install
+    bin.install "macbat"
   end
 
   test do
-    # Базовый тест запуска
-    assert_match version.to_s, shell_output("#{bin}/macbat --version 2>&1") || true
-    
-    # Проверка, что бинарник запускается
-    system "#{bin}/macbat", "--help"
+    system "#{bin}/macbat", "--version"
   end
 end

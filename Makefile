@@ -27,13 +27,13 @@ BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 # Получаем номер сборки (скрипт обновляет внутренний счётчик)
 BUILD_NUMBER := $(shell bash $(BUILD_SCRIPT) $(VERSION))
 # Добавляем номер сборки к версии
-VERSION := $(VERSION)+$(BUILD_NUMBER)
+# VERSION := $(VERSION)+$(BUILD_NUMBER)
 
 # Путь модуля
 MODULE_PATH = github.com/qzeleza/macbat
 
-# Флаги компоновщика для внедрения информации о версии в бинарный файл.
-LDFLAGS = -ldflags="\
+# Значение флага -ldflags для внедрения информации о версии.
+LDFLAGS = "\
     -X '$(MODULE_PATH)/internal/version.Version=$(VERSION)' \
     -X '$(MODULE_PATH)/internal/version.CommitHash=$(COMMIT_HASH)' \
     -X '$(MODULE_PATH)/internal/version.BuildDate=$(BUILD_DATE)' \
@@ -53,9 +53,39 @@ all: test
 
 # --- Цели для сборки ---
 # --- Настройки GitHub ---
-REPO          = qzeleza/macbat          # owner/repo на GitHub
-GH            ?= gh                     # GitHub CLI
-RELEASE_TITLE ?= "MacBat $(VERSION)"
+REPO = qzeleza/macbat
+TAP_REPO = qzeleza/homebrew-macbat
+GH ?= gh                     
+RELEASE_TITLE = "MacBat $(VERSION)"
+
+# Цель: del-tag – удалить произвольный тег локально и в origin.
+# Использование: make del-tag TAG=v2.1.1
+del-tag: ## Удалить указанный тег TAG=<tag>
+	@if [ -z "$(TAG)" ]; then \
+		echo "$(RED)Не указан TAG. Пример: make del-tag TAG=v2.1.1$(NC)"; exit 1; fi
+	@echo "$(YELLOW)Удаление тега $(TAG)...$(NC)"
+	@git tag -d $(TAG) 2>/dev/null || true
+	@git push --delete origin $(TAG) 2>/dev/null || true
+	@echo "$(GREEN)Тег $(TAG) удалён локально и на origin$(NC)"
+
+# Цель: tag – создание тега версии и пуш в origin
+next-tag: ## Сформировать новый тег (увеличивает PATCH на 1) и запушить
+	# берём последний корректный тег вида vX.Y.Z
+	@PREV=$$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1); \
+	if [ -z "$$PREV" ]; then PREV=v0.0.0; fi; \
+	echo "$(YELLOW)Предыдущий тег: $$PREV$(NC)"; \
+	NEW=$$(echo $$PREV | sed 's/^v//' | awk -F. '{OFS="."; $$NF=$$NF+1; print $$0}'); \
+	NEW_TAG=v$$NEW; \
+	if git rev-parse $(NEW_TAG) >/dev/null 2>&1; then \
+		echo "$(YELLOW)Тег $(NEW_TAG) уже существует – удаляем локально и в origin...$(NC)"; \
+		git tag -d $(NEW_TAG) >/dev/null; \
+		git push --delete origin $(NEW_TAG) >/dev/null 2>&1 || true; \
+		$(GH) release delete $(NEW_TAG) --yes >/dev/null 2>&1 || true; \
+	fi; \
+	echo "$(GREEN)Новый тег: $$NEW_TAG$(NC)"; \
+	git tag -a $$NEW_TAG -m "Выпуск $$NEW_TAG"; \
+	git push origin $$NEW_TAG; \
+	echo "$(GREEN)Тег $$NEW_TAG создан и отправлен$(NC)"
 
 # Цель: publish – полный цикл публикации релиза на GitHub
 # 1. Сборка релизного бинарника (make release)
@@ -65,30 +95,58 @@ RELEASE_TITLE ?= "MacBat $(VERSION)"
 # 5. Обновление Homebrew formula macbat.rb (version + sha256)
 # 6. Коммит formula и пуш в origin
 # Требования: установлен GitHub CLI (`gh`) и переменная окружения GH_TOKEN с правами на репозиторий.
-publish: release ## Сформировать релиз, выложить на GitHub и обновить Homebrew formula
-    @echo "$(YELLOW)▶️  Публикация релиза $(VERSION)$(NC)"
-    @if ! $(GH) auth status >/dev/null 2>&1; then \
-        echo "$(RED)🔑 GH CLI не авторизован. Выполните 'gh auth login' или задайте GH_TOKEN$(NC)"; exit 1; fi
-    # --- Git tag ---
-    @git tag -a $(VERSION) -m "Публикация релиза $(VERSION)" || true
-    @git push origin $(VERSION)
-    # --- GitHub release ---
-    $(GH) release create $(VERSION) ./$(BINARY_NAME) \
-      --repo $(REPO) \
-      --title $(RELEASE_TITLE) \
-      --notes "Автоматический релиз $(VERSION), build $(BUILD_NUMBER)"
-    # --- Source tarball & sha256 ---
-    @git archive --format=tar.gz --prefix=macbat-$(VERSION)/ $(VERSION) -o macbat-$(VERSION).tar.gz
-    @SHA=$$(shasum -a 256 macbat-$(VERSION).tar.gz | awk '{print $$1}'); \
-        sed -i '' -e "s/^  url \\".*\\"/  url \"https:\/\/github.com\/$(REPO)\/archive\/refs\/tags\/$(VERSION).tar.gz\"/" macbat.rb; \
-        sed -i '' -e "s/^  version \".*\"/  version \"$(VERSION)\"/" macbat.rb; \
-        sed -i '' -e "s/^  sha256 \".*\"/  sha256 \"$$SHA\"/" macbat.rb; \
-        echo "$(GREEN)Формула macbat.rb обновлена (sha256=$$SHA)$(NC)";
-    # --- Commit formula ---
-    @git add macbat.rb
-    @git commit -m "brew formula: update to $(VERSION) ($$SHA)" || true
-    @git push origin HEAD
-    @echo "$(GREEN)✅ Релиз $(VERSION) опубликован$(NC)"
+publish: release next-tag ## Сформировать релиз, выложить на GitHub и обновить Homebrew formula
+	
+	@echo "$(YELLOW)▶️  Публикация релиза $(VERSION)$(NC)"
+	@if ! $(GH) auth status >/dev/null 2>&1; then \
+		echo "$(RED)🔑 GH CLI не авторизован. Выполните 'gh auth login' или задайте GH_TOKEN$(NC)"; exit 1; fi
+	
+
+	
+	# --- GitHub release ---
+	@echo "$(YELLOW)Создание релиза $(VERSION)...$(NC)"
+	$(GH) release create $(VERSION) ./$(BINARY_NAME) \
+		--repo $(REPO) \
+		--title $(RELEASE_TITLE) \
+		--notes "Автоматический релиз $(VERSION), build $(BUILD_NUMBER)"
+	
+	@echo "$(YELLOW)Сборка и упаковка бинарников для macOS (amd64/arm64)...$(NC)"; \
+	mkdir -p dist; \
+	for ARCH in amd64 arm64; do \
+		GOOS=darwin GOARCH=$$ARCH CGO_ENABLED=1 go build -ldflags=$(LDFLAGS) -o dist/macbat $$PWD/$(MAIN_PATH); \
+		tar -czf dist/macbat-darwin-$$ARCH.tar.gz -C dist macbat; \
+		echo "$(CYAN)– $$ARCH собран$(NC)"; \
+		$(GH) release upload $(VERSION) dist/macbat-darwin-$$ARCH.tar.gz --clobber; \
+		mv dist/macbat dist/macbat-$$ARCH; \
+	done; \
+	SHA_AMD64=$$(shasum -a 256 dist/macbat-darwin-amd64.tar.gz | awk '{print $$1}'); \
+	SHA_ARM64=$$(shasum -a 256 dist/macbat-darwin-arm64.tar.gz | awk '{print $$1}'); \
+	echo "$(YELLOW)Генерация новой Homebrew formula $(BINARY_NAME).rb...$(NC)"; \
+	FORMULA_TMP=$$(mktemp); \
+	printf 'class Macbat < Formula\n' > $$FORMULA_TMP; \
+	printf '  desc "Утилита мониторинга аккумулятора (binary)"\n' >> $$FORMULA_TMP; \
+	printf '  homepage "https://github.com/$(REPO)"\n' >> $$FORMULA_TMP; \
+	printf '  version "%s"\n\n' "$(VERSION)" >> $$FORMULA_TMP; \
+	printf '  on_macos do\n' >> $$FORMULA_TMP; \
+	printf '    if Hardware::CPU.arm?\n' >> $$FORMULA_TMP; \
+	printf '      url "https://github.com/$(REPO)/releases/download/%s/macbat-darwin-arm64.tar.gz"\n' "$(VERSION)" >> $$FORMULA_TMP; \
+	printf '      sha256 "%s"\n' "$$SHA_ARM64" >> $$FORMULA_TMP; \
+	printf '    else\n' >> $$FORMULA_TMP; \
+	printf '      url "https://github.com/$(REPO)/releases/download/%s/macbat-darwin-amd64.tar.gz"\n' "$(VERSION)" >> $$FORMULA_TMP; \
+	printf '      sha256 "%s"\n' "$$SHA_AMD64" >> $$FORMULA_TMP; \
+	printf '    end\n  end\n\n' >> $$FORMULA_TMP; \
+	printf '  def install\n    bin.install "macbat"\n  end\n\n' >> $$FORMULA_TMP; \
+	printf '  test do\n    system "#{bin}/macbat", "--version"\n  end\nend\n' >> $$FORMULA_TMP; \
+	mv $$FORMULA_TMP $(BINARY_NAME).rb; \
+
+	echo "$(GREEN)Formula с бинарниками создана$(NC)";
+	echo "$(YELLOW)Обновление tap-репозитория...$(NC)"; \
+	TMP=$$(mktemp -d); \
+	git clone --depth=1 "https://github.com/$(TAP_REPO).git" $$TMP; \
+	mkdir -p $$TMP/Formula; cp $(BINARY_NAME).rb $$TMP/Formula/; \
+	(cd $$TMP && git add Formula/$(BINARY_NAME).rb && git commit -m '$(BINARY_NAME) $(VERSION) (bin)' && git push origin HEAD); \
+	rm -rf $$TMP; \
+	echo "$(GREEN)✅ Релиз $(VERSION) с бинарниками опубликован$(NC)"
 
 build: ## Собрать бинарный файл с информацией о версии
 	@echo "$(GREEN)Сборка $(BINARY_NAME)...$(NC)"
@@ -96,7 +154,7 @@ build: ## Собрать бинарный файл с информацией о 
 	@echo "  Коммит: $(COMMIT_HASH)"
 	@echo "  Дата: $(BUILD_DATE)"
 	@echo "  Номер сборки: $(BUILD_NUMBER)"
-	CGO_ENABLED=1 go build $(LDFLAGS) -o $(BINARY_NAME) $(MAIN_PATH)
+	CGO_ENABLED=1 go build -ldflags=$(LDFLAGS) -o $(BINARY_NAME) $(MAIN_PATH)
 	@echo "$(GREEN)Сборка завершена: ./$(BINARY_NAME)$(NC)"
 
 run: build ## Собрать и запустить приложение для разработки
@@ -111,7 +169,7 @@ run: build ## Собрать и запустить приложение для �
 
 release: clean
 	@echo "$(YELLOW)Сборка $(BINARY_NAME) для релиза...$(NC)"
-	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/$(BINARY_NAME)
+	CGO_ENABLED=1 go build -ldflags=$(LDFLAGS) -o $(BINARY_NAME) ./cmd/$(BINARY_NAME)
 	@echo "$(GREEN)Сборка завершена: ./$(BINARY_NAME)$(NC)"
 
 install: clean release
@@ -125,19 +183,19 @@ clean-build: ## Удалить скомпилированный бинарный
 	@echo "$(GREEN)Очистка завершена.$(NC)"
 
 help: ## Показать справку по командам
-    @echo "$(GREEN)MacBat Makefile$(NC)"
-    @echo ""
-    # Авто-генерируем список целей с описаниями
-    @grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-        awk 'BEGIN {FS=":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
-    @echo ""
-    @echo "$(CYAN)Часто используемые цели:$(NC)"
-    @echo "  $(GREEN)make run$(NC)       – сборка и запуск приложения"
-    @echo "  $(GREEN)make release$(NC)   – сборка релизного бинарника"
-    @echo "  $(GREEN)make install$(NC)   – установка бинарника в /usr/local/bin"
-    @echo "  $(GREEN)make clean$(NC)     – полная очистка артефактов"
-    @echo "  $(GREEN)make test$(NC)      – запуск всех тестов"
-    @echo "  $(GREEN)make info$(NC)      – информация о проекте"
+	@echo "$(GREEN)MacBat Makefile$(NC)"
+	@echo ""
+	# Авто-генерируем список целей с описаниями
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS=":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(CYAN)Часто используемые цели:$(NC)"
+	@echo "  $(GREEN)make run$(NC)       – сборка и запуск приложения"
+	@echo "  $(GREEN)make release$(NC)   – сборка релизного бинарника"
+	@echo "  $(GREEN)make install$(NC)   – установка бинарника в /usr/local/bin"
+	@echo "  $(GREEN)make clean$(NC)     – полная очистка артефактов"
+	@echo "  $(GREEN)make test$(NC)      – запуск всех тестов"
+	@echo "  $(GREEN)make info$(NC)      – информация о проекте"
 	@echo ""
 	@echo "$(CYAN)Дополнительные цели:$(NC)"
 	@echo "  $(GREEN)make deps$(NC)      – установка зависимостей"

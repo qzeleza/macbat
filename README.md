@@ -22,10 +22,10 @@
 
 ```bash
 # Сначала подключите наш репозиторий (tap)
-brew tap zeleza/macbat
+brew tap qzeleza/macbat
 
 # Затем установите приложение
-brew install macbat
+brew install qzeleza/macbat/macbat
 ```
 
 После установки приложение автоматически запустится в фоновом режиме.

@@ -161,7 +161,7 @@ func (t *Tray) updateMenu() {
 
 	t.mCurrent.SetTitle(fmt.Sprintf("%-29s %4d%%  %-4s", "Текущий заряд", info.CurrentCapacity, icon))
 	if info.IsCharging {
-		t.timeToFullCharge.SetTitle(fmt.Sprintf("%-25s  %-5s", "До полного заряда", utils.FormatTimeToColonHMS(info.TimeToFull)))
+		t.timeToFullCharge.SetTitle(fmt.Sprintf("%-27s  %-5s", "До полного заряда", utils.FormatTimeToColonHMS(info.TimeToFull)))
 		t.timeToEmptyCharge.Hide()
 		t.timeToFullCharge.Show()
 	} else {
