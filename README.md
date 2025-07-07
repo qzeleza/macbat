@@ -47,7 +47,9 @@ macbat
 Для обновления приложения используйте команду:
 
 ```bash
-brew update && brew upgrade macbat
+brew update
+brew upgrade macbat
+macbat
 ```
 
 ## Использование
