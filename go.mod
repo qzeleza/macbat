@@ -19,6 +19,7 @@ require (
 	github.com/go-stack/stack v1.8.0 // indirect
 	github.com/gopherjs/gopherjs v1.17.2 // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/urfave/cli/v3 v3.3.8 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 )
