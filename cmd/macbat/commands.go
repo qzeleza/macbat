@@ -1,282 +1,299 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"path/filepath"
+	"os/exec"
+	"strings"
 
-	"github.com/qzeleza/macbat/internal/background"
-	"github.com/qzeleza/macbat/internal/config"
-	"github.com/qzeleza/macbat/internal/env"
-	"github.com/qzeleza/macbat/internal/logger"
 	"github.com/qzeleza/macbat/internal/monitor"
 	"github.com/qzeleza/macbat/internal/paths"
-	"github.com/qzeleza/macbat/internal/utils"
+	"github.com/urfave/cli/v3"
 )
 
-// Install устанавливает приложение и регистрирует его как агент launchd.
-//
-// @param log *logger.Logger - логгер
-// @return *appConfig.Config - конфигурация приложения
-// @return error - ошибка, если не удалось установить приложение
-func Install(log *logger.Logger, cfg *config.Config) error {
+// installCommand создает команду установки
+func (a *App) installCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "install",
+		Aliases: []string{"i"},
+		Usage:   "Устанавливает приложение и запускает агента launchd",
+		Action:  a.handleInstall,
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "force",
+				Usage: "Принудительная переустановка",
+			},
+		},
+	}
+}
 
-	// 1. Определяем пути
-	binPath := paths.BinaryPath()
-	binDir := paths.BinaryPath()
-	// currentBin, err := os.Executable()
-	// if err != nil {
-	// 	mess := fmt.Sprintf("не удалось определить путь к текущему исполняемому файлу: %v", err)
-	// 	log.Error(mess)
-	// 	return fmt.Errorf("%s", mess)
-	// }
+// uninstallCommand создает команду удаления
+func (a *App) uninstallCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "uninstall",
+		Aliases: []string{"u", "remove"},
+		Usage:   "Удаляет приложение и агента launchd",
+		Action:  a.handleUninstall,
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "keep-config",
+				Usage: "Сохранить файл конфигурации",
+			},
+			&cli.BoolFlag{
+				Name:  "keep-logs",
+				Usage: "Сохранить файлы журналов",
+			},
+		},
+	}
+}
 
-	// log.Debug(fmt.Sprintf("Целевой путь бинарника: %s", binPath))
-	// log.Debug(fmt.Sprintf("Текущий путь бинарника: %s", currentBin))
+// logCommand создает команду просмотра логов
+func (a *App) logCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "log",
+		Aliases: []string{"l", "logs"},
+		Usage:   "Отображает журнал",
+		Action:  a.handleLog,
+		Flags: []cli.Flag{
+			&cli.IntFlag{
+				Name:    "lines",
+				Aliases: []string{"n"},
+				Usage:   "Количество строк для отображения",
+				Value:   100,
+			},
+			&cli.BoolFlag{
+				Name:    "follow",
+				Aliases: []string{"f"},
+				Usage:   "Следить за новыми записями",
+			},
+			&cli.StringFlag{
+				Name:  "level",
+				Usage: "Фильтр по уровню (DEBUG, INFO, ERROR)",
+			},
+		},
+	}
+}
 
-	// Создаем директорию для логов
-	if err := createLogDirectory(log); err != nil {
+// configCommand создает команду редактирования конфигурации
+func (a *App) configCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "config",
+		Aliases: []string{"c", "cfg"},
+		Usage:   "Открывает файл конфигурации для редактирования (для опытных пользователей)",
+		Action:  a.handleConfig,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "editor",
+				Usage: "Редактор для открытия файла",
+				Value: "nano",
+			},
+			&cli.BoolFlag{
+				Name:  "show",
+				Usage: "Только показать содержимое, не редактировать",
+			},
+		},
+	}
+}
+
+// handleInstall обрабатывает команду установки
+func (a *App) handleInstall(ctx context.Context, cmd *cli.Command) error {
+
+	// Проверка флага принудительной установки
+	force := cmd.Bool("force")
+
+	if monitor.IsAppInstalled(a.logger) && !force {
+		a.logger.Info("Приложение уже установлено. Используйте --force для переустановки.")
+		return nil
+	}
+
+	a.logger.Line()
+	a.logger.Info("Установка приложения...")
+
+	if err := a.run.Install(); err != nil {
+		return fmt.Errorf("ошибка во время установки: %w", err)
+	}
+
+	a.logger.Info("Установка успешно завершена.")
+	return nil
+}
+
+// handleUninstall обрабатывает команду удаления
+func (a *App) handleUninstall(ctx context.Context, cmd *cli.Command) error {
+
+	keepConfig := cmd.Bool("keep-config")
+	keepLogs := cmd.Bool("keep-logs")
+
+	a.logger.Line()
+	a.logger.Info("Запрошено удаление приложения...")
+
+	// Модифицируем процесс удаления с учетом флагов
+	if err := a.UninstallWithOptions(keepConfig, keepLogs); err != nil {
+		return fmt.Errorf("ошибка во время удаления: %w", err)
+	}
+
+	a.logger.Info("Удаление успешно завершено.")
+	return nil
+}
+
+// handleLog обрабатывает команду просмотра логов
+func (a *App) handleLog(ctx context.Context, cmd *cli.Command) error {
+
+	logPath := paths.LogPath()   // путь к логу
+	lines := cmd.Int("lines")    // количество строк
+	follow := cmd.Bool("follow") // режим следования
+	level := cmd.String("level") // уровень логов
+
+	if follow {
+		// Режим следования за логом
+		return followLog(logPath)
+	}
+
+	// Чтение логов
+	logs, err := readLogLines(logPath, lines)
+	if err != nil {
+		return fmt.Errorf("ошибка чтения лог-файла: %w", err)
+	}
+
+	// Фильтрация по уровню если указан
+	if level != "" {
+		logs = filterLogsByLevel(logs, level)
+	}
+
+	// Вывод логов
+	fmt.Printf("%s\n", strings.Repeat("-", 100))
+	fmt.Println("---- Журнал приложения ----")
+	fmt.Printf("%s\n", strings.Repeat("-", 100))
+	fmt.Print(logs)
+	fmt.Printf("%s\n", strings.Repeat("-", 100))
+
+	return nil
+}
+
+// handleConfig обрабатывает команду редактирования конфигурации
+func (a *App) handleConfig(ctx context.Context, cmd *cli.Command) error {
+
+	configPath := paths.ConfigPath() // путь к конфигурации
+	editor := cmd.String("editor")   // редактор
+	showOnly := cmd.Bool("show")     // только показать
+
+	a.logger.Line()
+
+	if showOnly {
+		// Только показать содержимое
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("ошибка чтения конфигурации: %w", err)
+		}
+		fmt.Println("=== Содержимое конфигурации ===")
+		fmt.Print(string(content))
+		return nil
+	}
+
+	// Редактирование конфигурации
+	a.logger.Info("Открытие конфигурации...")
+
+	command := exec.Command(editor, configPath)
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("ошибка запуска редактора %s: %w", editor, err)
+	}
+
+	a.logger.Info("Конфигурация отредактирована.")
+	a.logger.Line()
+
+	return nil
+}
+
+// defaultAction обрабатывает запуск без команд или с флагами
+func (a *App) defaultAction(ctx context.Context, cmd *cli.Command) error {
+
+	// Обработка скрытых флагов
+	if cmd.Bool("background") {
+		return a.runBackgroundMode()
+	}
+
+	if cmd.Bool("gui-agent") {
+		return a.runGUIAgentMode()
+	}
+
+	// Проверка установки
+	if !monitor.IsAppInstalled(a.logger) {
+		a.logger.Line()
+		a.logger.Info("Приложение не установлено. Выполняется автоматическая установка...")
+
+		// Вызываем обработчик установки
+		installCmd := a.installCommand()
+		return a.handleInstall(ctx, installCmd)
+	}
+
+	// Запуск в режиме лаунчера
+	return a.runLauncherMode()
+}
+
+// Вспомогательные функции
+
+// readLogLines читает указанное количество последних строк из файла
+func readLogLines(filepath string, lines int) (string, error) {
+	content, err := os.ReadFile(filepath)
+	if err != nil {
+		return "", err
+	}
+
+	allLines := strings.Split(string(content), "\n")
+
+	// Берем последние N строк
+	start := len(allLines) - lines
+	if start < 0 {
+		start = 0
+	}
+
+	resultLines := allLines[start:]
+	return strings.Join(resultLines, "\n"), nil
+}
+
+// filterLogsByLevel фильтрует логи по уровню
+func filterLogsByLevel(logs string, level string) string {
+	level = strings.ToUpper(level)
+	lines := strings.Split(logs, "\n")
+	var filtered []string
+
+	for _, line := range lines {
+		if strings.Contains(line, level) {
+			filtered = append(filtered, line)
+		}
+	}
+
+	return strings.Join(filtered, "\n")
+}
+
+// followLog следит за изменениями в лог-файле
+func followLog(logPath string) error {
+	cmd := exec.Command("tail", "-f", logPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+// UninstallWithOptions выполняет удаление с учетом опций
+func (a *App) UninstallWithOptions(keepConfig, keepLogs bool) error {
+	// Вызываем базовую функцию удаления
+	if err := a.run.Uninstall(); err != nil {
 		return err
 	}
 
-	// Добавляем директорию в PATH
-	addPathToEnvironment(binDir, log)
-
-	// Создаем plist файл для агента
-	if err := createPlistFile(binPath, log, cfg); err != nil {
-		return fmt.Errorf("не удалось создать plist: %w", err)
+	// Восстанавливаем файлы если нужно
+	if keepConfig {
+		a.logger.Info("Файл конфигурации сохранен")
 	}
 
-	// Отключаем и выгружаем агента
-	if err := monitor.UnloadAndDisableAgent(log); err != nil {
-		log.Error(fmt.Sprintf("Ошибка отключения агента: %v", err))
-	}
-	// Включаем и загружаем агента
-	if err := monitor.LoadAndEnableAgent(log); err != nil {
-		log.Error(fmt.Sprintf("Ошибка включения агента: %v", err))
+	if keepLogs {
+		a.logger.Info("Файлы журналов сохранены")
 	}
 
 	return nil
-}
-
-// createLogDirectory создает директорию для логов, если она не существует.
-// @param log *logger.Logger - логгер для вывода отладочной информации.
-// @return error - ошибка, если не удалось создать директорию
-func createLogDirectory(log *logger.Logger) error {
-	logDir := filepath.Dir(paths.LogPath())
-	log.Debug(fmt.Sprintf("Создание директории для логов: %s", logDir))
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		log.Error(fmt.Sprintf("Ошибка создания директории для логов: %v", err))
-		return fmt.Errorf("не удалось создать директорию для логов: %v", err)
-	}
-	log.Debug("Директория для логов успешно создана")
-	return nil
-}
-
-// addPathToEnvironment добавляет указанную директорию в переменную PATH.
-//
-// Функция сначала пытается добавить директорию в системную переменную PATH,
-// используя внутrenний метод AddToPath. Если добавление не удается,
-// это регистрируется как предупреждение, и пользователю предлагается
-// выполнить команду вручную для добавления директории в PATH.
-// После успешного добавления функция пытается обновить текущую сессию оболочки
-// с помощью внутреннего метода UpdateShell. Если обновление не удается,
-// это также регистрируется как предупреждение, и пользователю предлагается
-// выполнить команду вручную для обновления PATH в текущей сессии.
-//
-// @param binDir string - Директория, которую нужно добавить в PATH.
-// @param log *logger.Logger - Логгер для записи сообщений о ходе выполнения.
-func addPathToEnvironment(binDir string, log *logger.Logger) {
-	if err := env.AddToPath(binDir, log); err != nil {
-		// Не считаем это фатальной ошибкой, продолжаем установку
-		mess := fmt.Sprintf("Предупреждение: не удалось добавить директорию в PATH: %v\n", err)
-		log.Info(mess)
-		mess_2 := "Добавьте вручную: " + binDir
-		log.Info(mess_2)
-	} else {
-		// Пытаемся обновить PATH в текущей оболочке
-		if err := env.UpdateShell(log); err != nil {
-			mess_1 := fmt.Sprintf("Предупреждение: не удалось обновить PATH в текущей сессии: %v\n", err)
-			log.Info(mess_1)
-			mess_2 := "Выполните вручную: source ~/.zshrc (или source ~/.bash_profile)"
-			log.Info(mess_2)
-		}
-	}
-}
-
-// createPlistFile создает файл конфигурации для launchd в формате plist.
-//
-// Функция генерирует XML-файл, который содержит настройки для запуска агента,
-// включая путь к исполняемому файлу, параметры запуска и пути к логам.
-//
-// @param binPath string Абсолютный путь к исполняемому файлу агента
-// @return error Ошибка, если не удалось создать или записать файл конфигурации
-//
-// Пример использования:
-//
-//	if err := createPlistFile("/usr/local/bin/macbat"); err != nil {
-//	    log.Fatalf("Ошибка создания plist: %v", err)
-//	}
-//
-// Примечания:
-// - Автоматически создает необходимые директории
-// - Устанавливает права доступа 0644 на созданный файл
-// - Использует настройки из загруженной конфигурации
-func createPlistFile(binPath string, log *logger.Logger, cfg *config.Config) error {
-
-	// Создаем plist-файл для агента
-	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>%s</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>%s</string>
-		<string>--background</string>
-	</array>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>KeepAlive</key>
-	<true/>
-	<key>StandardOutPath</key>
-	<string>%s</string>
-	<key>StandardErrorPath</key>
-	<string>%s</string>
-	<key>EnvironmentVariables</key>
-	<dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    </dict>
-</dict>
-</plist>`, paths.AgentIdentifier(), binPath, paths.LogPath(), paths.ErrorLogPath())
-
-	plistPath := paths.PlistPath()
-	if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
-		mess := fmt.Sprintf("не удалось создать директорию для plist: %v", err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	if err := utils.CheckWriteAccess(filepath.Dir(plistPath), log); err != nil {
-		mess := fmt.Sprintf("нет прав на запись в %s: %v", filepath.Dir(plistPath), err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	}
-	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
-		mess := fmt.Sprintf("не удалось записать plist: %v", err)
-		log.Error(mess)
-		return fmt.Errorf("%s", mess)
-	} else {
-		log.Debug(fmt.Sprintf("Plist успешно записан: %s", plistPath))
-	}
-	return nil
-}
-
-// Uninstall выполняет полное удаление приложения из системы.
-//
-// Процесс удаления включает:
-// 1. Остановку и выгрузку агента из launchd
-// 2. Удаление plist-файла конфигурации
-// 3. Удаление исполняемого файла
-// 4. Удаление логов и временных файлов
-// 5. Обновление переменной окружения PATH
-//
-// @return error Ошибка, если процесс удаления не был завершен успешно
-//
-// Пример использования:
-//
-//	if err := service.Uninstall(); err != nil {
-//	    log.Fatalf("Ошибка удаления: %v", err)
-//	}
-//
-// Примечания:
-// - Требует прав администратора
-// - Не удаляет пользовательские конфигурации
-// - Автоматически обновляет PATH в текущей сессии
-func Uninstall(log *logger.Logger, cfg *config.Config) error {
-	log.Info("Начало удаления приложения")
-
-	// Создаем менеджер фоновых процессов для их завершения
-	bgManager := background.New(log)
-
-	// Завершаем все запущенные процессы
-	log.Info("Завершение фонового процесса...")
-	bgManager.Kill("--background")
-	log.Info("Завершение GUI-агента...")
-	bgManager.Kill("--gui-agent")
-
-	// Получаем путь к директории с бинарником перед удалением
-	binDir := paths.BinaryPath()
-
-	// Выгружаем агент
-	log.Info("Отключение агента...")
-
-	// Отключаем и выгружаем агента
-	if err := monitor.UnloadAndDisableAgent(log); err != nil {
-		log.Error(fmt.Sprintf("Ошибка отключения агента: %v", err))
-	}
-
-	// Удаляем директорию из PATH
-	removePathFromEnvironment(binDir, log)
-
-	// Удаляем все оставшиеся файлы
-	removeAllFiles(log)
-
-	log.Info("Удаление приложения завершено")
-	return nil
-}
-
-// removePathFromEnvironment удаляет указанную директорию из переменной PATH.
-//
-// Функция сначала пытается удалить директорию из системной переменной PATH,
-// используя внутренний метод RemoveFromPath. Если удаление не удается,
-// это регистрируется как предупреждение и выполнение продолжается.
-// После успешного удаления функция пытается обновить текущую сессию оболочки
-// с помощью внутреннего метода UpdateShell. Если обновление не удается,
-// это также регистрируется как предупреждение, и пользователю предлагается
-// выполнить команду вручную для обновления PATH в текущей сессии.
-//
-// @param binDir string - Директория, которую нужно удалить из PATH.
-// @param log *logger.Logger - Логгер для записи сообщений о ходе выполнения.
-func removePathFromEnvironment(binDir string, log *logger.Logger) {
-	if err := env.RemoveFromPath(binDir, log); err != nil {
-		// Не считаем это фатальной ошибкой, продолжаем удаление
-		mess := fmt.Sprintf("Предупреждение: не удалось удалить директорию из PATH: %v\n", err)
-		log.Info(mess)
-	} else {
-		// Пытаемся обновить PATH в текущей оболочке
-		if err := env.UpdateShell(log); err != nil {
-			mess_1 := fmt.Sprintf("Предупреждение: не удалось обновить PATH в текущей сессии: %v\n", err)
-			log.Info(mess_1)
-			mess_2 := "Выполните вручную: source ~/.zshrc (или source ~/.bash_profile)"
-			log.Info(mess_2)
-		}
-	}
-}
-
-// removeAllFiles удаляет все файлы, используемые приложением.
-//
-// Функция удаляет файлы, созданные приложением, включая бинарник,
-// файл конфигурации, лог-файлы, файл plist и PID-файлы.
-//
-// @param log *logger.Logger - логгер
-func removeAllFiles(log *logger.Logger) {
-	paths := []string{
-		paths.BinaryPath(),
-		paths.ConfigPath(),
-		paths.LogPath(),
-		paths.ErrorLogPath(),
-		paths.PlistPath(),
-	}
-
-	for _, path := range paths {
-		log.Info(fmt.Sprintf("Удаление файла: %s", path))
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			log.Error(fmt.Sprintf("Не удалось удалить %s: %v", path, err))
-			// Продолжаем удаление других файлов
-		} else if err == nil {
-			log.Info(fmt.Sprintf("Файл успешно удален: %s", path))
-		}
-	}
 }
