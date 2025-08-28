@@ -18,12 +18,12 @@ const AppName = "macbat"
 func BinaryPath() string {
 	// os.Executable() возвращает полный путь к текущему исполняемому файлу.
 	// Это именно то, что нужно для запуска копии процесса.
-	binPath, err := os.Executable()
-	if err != nil {
-		// В случае ошибки возвращаем базовое имя, предполагая, что оно в PATH.
-		return AppName
-	}
-	return binPath
+	// binPath, err := os.Executable()
+	// if err != nil {
+	// 	// В случае ошибки возвращаем базовое имя, предполагая, что оно в PATH.
+	// 	return AppName
+	// }
+	return filepath.Join("/opt/homebrew/bin", AppName)
 }
 
 // AppSupportDir возвращает путь к директории поддержки приложения.
