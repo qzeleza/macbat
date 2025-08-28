@@ -25,27 +25,25 @@ import (
 
 // Tray управляет иконкой и меню в системном трее.
 type Tray struct {
-	log                   *logger.Logger      // Логгер
-	cfg                   *config.Config      // Конфигурация
-	cfgManager            *config.Manager     // Менеджер конфигурации
-	bgManager             *background.Manager // Менеджер бэкграунда
-	mChargeMode           *systray.MenuItem   // Пункт "Режим зарядки"
-	mCurrent              *systray.MenuItem   // Пункт "Текущий заряд"
-	mMin                  *systray.MenuItem   // Пункт "Минимальный порог"
-	mMax                  *systray.MenuItem   // Пункт "Максимальный порог"
-	mCycles               *systray.MenuItem   // Пункт "Циклы заряда"
-	mHealth               *systray.MenuItem   // Пункт "Здоровье батареи"
-	mCheckCharging        *systray.MenuItem   // Пункт "Интервал проверки (зарядка)"
-	mCheckDischarging     *systray.MenuItem   // Пункт "Интервал проверки (разрядка)"
-	mMaxNotifications     *systray.MenuItem   // Пункт "Количество уведомлений"
-	mSettings             *systray.MenuItem   // Пункт "Настройки"
-	mConfig               *systray.MenuItem   // Пункт "Открыть config.json"
-	mLogs                 *systray.MenuItem   // Пункт "Открыть macbat.log"
-	timeToFullCharge      *systray.MenuItem   // Пункт "Время до полной зарядки"
-	timeToEmptyCharge     *systray.MenuItem   // Пункт "Время до полной разрядки"
-	mNotificationInterval *systray.MenuItem   // Пункт "Интервал показа уведомлений"
-	mVersion              *systray.MenuItem   // Пункт "Версия"
-	updateMu              sync.Mutex          // Мьютекс для защиты обновления меню
+	log               *logger.Logger      // Логгер
+	cfg               *config.Config      // Конфигурация
+	cfgManager        *config.Manager     // Менеджер конфигурации
+	bgManager         *background.Manager // Менеджер бэкграунда
+	mChargeMode       *systray.MenuItem   // Пункт "Режим зарядки"
+	mCurrent          *systray.MenuItem   // Пункт "Текущий заряд"
+	mMin              *systray.MenuItem   // Пункт "Минимальный порог"
+	mMax              *systray.MenuItem   // Пункт "Максимальный порог"
+	mCycles           *systray.MenuItem   // Пункт "Циклы заряда"
+	mHealth           *systray.MenuItem   // Пункт "Здоровье батареи"
+	mCheckCharging    *systray.MenuItem   // Пункт "Интервал проверки (зарядка)"
+	mCheckDischarging *systray.MenuItem   // Пункт "Интервал проверки (разрядка)"
+	mSettings         *systray.MenuItem   // Пункт "Настройки"
+	mConfig           *systray.MenuItem   // Пункт "Открыть config.json"
+	mLogs             *systray.MenuItem   // Пункт "Открыть macbat.log"
+	timeToFullCharge  *systray.MenuItem   // Пункт "Время до полной зарядки"
+	timeToEmptyCharge *systray.MenuItem   // Пункт "Время до полной разрядки"
+	mVersion          *systray.MenuItem   // Пункт "Версия"
+	updateMu          sync.Mutex          // Мьютекс для защиты обновления меню
 }
 
 // New создает новый экземпляр Tray.
@@ -109,8 +107,6 @@ func (t *Tray) onReady() {
 	t.mSettings = systray.AddMenuItem("Пороговые интервалы", "")
 	t.mCheckCharging = t.mSettings.AddSubMenuItem("Интервал проверки при зарядке", "Установка интервала проверки, когда батарея заряжается")
 	t.mCheckDischarging = t.mSettings.AddSubMenuItem("Интервал проверки при разрядке", "Установка интервала проверки, когда батарея разряжается")
-	t.mMaxNotifications = t.mSettings.AddSubMenuItem("Число уведомлений", "Установка максимального количества повторов уведомлений о достижении порогов")
-	t.mNotificationInterval = t.mSettings.AddSubMenuItem("Интервал показа уведомлений", "Установка интервала показа повторных уведомлений")
 
 	// --- Подменю настроек и журнала ---
 	t.mSettings = systray.AddMenuItem("Настройки и журнал", "Не рекомендуется открывать, если не уверены в своих действиях.")
@@ -169,7 +165,11 @@ func (t *Tray) updateMenu() {
 		t.timeToEmptyCharge.Hide()
 		t.timeToFullCharge.Show()
 	} else {
-		t.timeToEmptyCharge.SetTitle(fmt.Sprintf("%-26s  %-5s", "До полного разряда", utils.FormatTimeToColonHMS(info.TimeToEmpty)))
+		if info.TimeToEmpty <= 0 {
+			t.timeToEmptyCharge.SetTitle(fmt.Sprintf("%-26s  %-5s", "До полного разряда", "Расчёт..."))
+		} else {
+			t.timeToEmptyCharge.SetTitle(fmt.Sprintf("%-26s  %-5s", "До полного разряда", utils.FormatTimeToColonHMS(info.TimeToEmpty)))
+		}
 		t.timeToFullCharge.Hide()
 		t.timeToEmptyCharge.Show()
 	}
@@ -194,8 +194,6 @@ func (t *Tray) updateMenu() {
 	// Обновляем пункты меню
 	t.mCheckCharging.SetTitle(fmt.Sprintf("%-36s %4d сек.", "Интервал проверки при зарядке", t.cfg.CheckIntervalWhenCharging))
 	t.mCheckDischarging.SetTitle(fmt.Sprintf("%-35s %4d сек.", "Интервал проверки при разрядке", t.cfg.CheckIntervalWhenDischarging))
-	t.mMaxNotifications.SetTitle(fmt.Sprintf("%-45s %4d увед.", "Число уведомлений", t.cfg.MaxNotifications))
-	t.mNotificationInterval.SetTitle(fmt.Sprintf("%-42s %6d сек.", "Интервал уведомлений", t.cfg.NotificationInterval))
 }
 
 // getChargeModeStr возвращает строку и иконку режима питания.
@@ -353,14 +351,6 @@ func (t *Tray) handleMenuClicks(mSettings, mLogs, mConfig, mQuit *systray.MenuIt
 		case <-t.mCheckDischarging.ClickedCh:
 			t.handleIntegerConfigChange("check_interval_discharging", "Интервал проверки (разрядка)", "Введите интервал в секундах:")
 
-		// --- Выбрали пункт "Количество уведомлений" ---
-		case <-t.mMaxNotifications.ClickedCh:
-			t.handleIntegerConfigChange("max_notifications", "Количество уведомлений", "Введите максимальное количество уведомлений:")
-
-		// --- Выбрали пункт "Интервал показа уведомлений" ---
-		case <-t.mNotificationInterval.ClickedCh:
-			t.handleIntegerConfigChange("notification_interval", "Интервал показа уведомлений", "Введите интервал в секундах:")
-
 		// Нажатие на "Выход"
 		case <-mQuit.ClickedCh:
 			if confirmed, err := dlgs.Question("Выход", "Вы уверены, что хотите закрыть приложение?", true); err != nil {
@@ -395,10 +385,6 @@ func (t *Tray) handleIntegerConfigChange(key, title, prompt string) {
 		currentVal = t.cfg.CheckIntervalWhenCharging
 	case "check_interval_discharging":
 		currentVal = t.cfg.CheckIntervalWhenDischarging
-	case "max_notifications":
-		currentVal = t.cfg.MaxNotifications
-	case "notification_interval":
-		currentVal = t.cfg.NotificationInterval
 	default:
 		dlgs.Error(title, "Внутренняя ошибка: неизвестный ключ конфигурации.")
 		return
@@ -425,8 +411,6 @@ func (t *Tray) handleIntegerConfigChange(key, title, prompt string) {
 		t.cfg.CheckIntervalWhenCharging = newValue
 	case "check_interval_discharging":
 		t.cfg.CheckIntervalWhenDischarging = newValue
-	case "max_notifications":
-		t.cfg.MaxNotifications = newValue
 	}
 
 	if err := t.cfgManager.Save(t.cfg); err != nil {

@@ -3,64 +3,33 @@
 
 /**
  * @file monitor.go
- * @brief Модуль для мониторинга состояния батареи ноутбука.
+ * @brief Модуль для мониторинга состояния батареи ноутбука с уведомлениями на каждый процент изменения заряда.
  *
  * Этот модуль отслеживает уровень заряда и состояние подключения к сети.
- * Он отправляет уведомления, когда уровень заряда падает ниже минимального порога
- * при работе от батареи или поднимается выше максимального порога при зарядке.
+ * Он отправляет уведомления при каждом изменении уровня заряда на 1%:
+ * - При зарядке: уведомление на каждый +1% заряда до отключения зарядки
+ * - При разрядке: уведомление на каждый -1% заряда до подключения зарядки
+ *
  * Модуль является гибко настраиваемым и легко тестируемым.
-
+ *
  * @author Zeleza
- * @date 2025-06-21
-
-
- * @requestAI
-
-	1. Напиши код модуля на Go стараясь использовать только библиотеки самого go,
-	   постарайся не использовать системные команды вызывая их cmd.Exec или подобные системные вызовы.
-
-	2. Модуль должен проверять состояние батареи ноутбука.
-
-	3. Если текущий уровень заряда не изменился относительно переменной lastLevel, то сразу
-	   выходим из проверки состояний триггеров.
-
-	4. Если зарядка не подключена и текущий уровень заряда снизился установленного минимума
-	   (задается в константе MinThreshold), то проверяем когда крайний раз отображалось
-	   системное уведомление и если обо было больше, чем в константе NotificationInterval
-	   и общее число показанных уведомлений было менее чем установлено в константе MaxNotifications,
-	   то отображаем в этом случае системное уведомление для macos x.
-
-	5. Если же, зарядка подключена и текущий уровень заряда повысился до установленного максимума
-	   (задается в константе MaxThreshold), то проверяем когда крайний раз отображалось системное уведомление
-	   и если обо было больше, чем в константе NotificationInterval и общее число показанных уведомлений
-	   было менее чем установлено в константе MaxNotifications, то отображаем в этом случае системное уведомление.
-
-	6. В случае, обнаружения смены режима заряда (с зарядки на разрядку или наоборот)
-	   - все переменные сбрасываются.
-	   Для проверки достижения состояний тригерров для показа системного сообщения
-	   используй разные функции проверки состояний в случае разряда и заряда батареи.
-
-	7. Для удобства тестирования предусмотри возможность в отдельной функции/модуля для автоматической симуляции
-	   параметров батареи ноутбука. Сделай так, чтобы при симуляции режима, смена режима зарядки
-	   не происходила до тех пор, пока не будет достигнуто одно из пороговых значений: MinThreshold или MaxThreshold.
-	    при этом, код функции стимулятора должен быть таким, чтобы как можно чаще трестировались тригерные режимы
-		- когда достигались крайние триггерные режимы maxThreshold и minThreshold.
-
-	8. Сделай так, чтобы смена режима зарядки в симуляторе происходила, только после достижения текущего значения
-		показанных уведомлений до значения в переменной MaxNotifications. И так, чтобы при симуляции текущий
-		уровень зарядки изменялся бы вверх и вниз (в зависимости от типа текущего состояния зарядки) на 1%.
-
-	9. Функцию показа системного уведомления - пока сделай в виде вывода сообщений
-	   в файл лога /tmp/macbat.log. При этом, сделай так, чтобы логфайл создавался новый,
-	   если размер файла превысит N записей
-
-	10. Если можно улучшить код - сделай это и подробно прокомментируй весь код на русском,
-	   также, в формате doxygen создай описание функций и самого модуля.
-
-	11. Теперь, доработай код так, чтобы проверка заряда батареи запускалась в цикле по следующим правилам:
-		- если текущий цикл зарядки, то цикл опроса равен значению переменной CheckIntervalWhenCharging,
-		- а если происходит разрядка то цикл опроса равен значению переменной CheckIntervalWhenDischarging
-*/
+ * @date 2025-08-07
+ * @version 2.1.18
+ *
+ * @details
+ * Основные принципы работы:
+ * 1. Модуль использует только стандартные библиотеки Go, избегая системных вызовов.
+ * 2. Проверяет состояние батареи ноутбука в непрерывном цикле.
+ * 3. Если текущий уровень заряда не изменился относительно lastLevel, проверка пропускается.
+ * 4. При разрядке: отправляет уведомление на каждое снижение заряда на 1% до подключения зарядки.
+ * 5. При зарядке: отправляет уведомление на каждое увеличение заряда на 1% до отключения зарядки.
+ * 6. При смене режима заряда (зарядка ↔ разрядка) состояние сбрасывается.
+ * 7. Использует разные функции для проверки состояний при заряде и разряде батареи.
+ * 8. Поддерживает режим симуляции для тестирования с изменением заряда на 1% за итерацию.
+ * 9. Для отображения системных уведомлений использует модуль dialog.
+ * 10. Интервал проверки зависит от режима: CheckIntervalWhenCharging при зарядке,
+ *     CheckIntervalWhenDischarging при разрядке.
+ */
 
 //================================================================================
 // ПОДКЛЮЧЕНИЕ БИБЛИОТЕК
@@ -84,15 +53,13 @@ import (
 
 // Monitor - это основная структура фонового процесса.
 type Monitor struct {
-	config                 config.Config   // Конфигурация монитора.
-	log                    *logger.Logger  // Объект для отправки уведомлений.
-	cfgManager             *config.Manager // Менеджер конфигурации.
-	lastNotificationTime   time.Time       // Временная метка последнего уведомления.
-	notificationsRemaining int             // Счетчик показанных уведомлений в текущем цикле.
-	lastKnownCharging      bool            // Последнее известное состояние (заряжается/не заряжается).
-	isInitialized          bool            // Флаг, показывающий, был ли монитор запущен хотя бы раз.
-	lastLevel              int             // Последний известный уровень заряда для оптимизации.
-	stopChan               chan struct{}
+	config            config.Config   // Конфигурация монитора.
+	log               *logger.Logger  // Объект для отправки уведомлений.
+	cfgManager        *config.Manager // Менеджер конфигурации.
+	lastKnownCharging bool            // Последнее известное состояние (заряжается/не заряжается).
+	isInitialized     bool            // Флаг, показывающий, был ли монитор запущен хотя бы раз.
+	lastLevel         int             // Последний известный уровень заряда для оптимизации.
+	stopChan          chan struct{}
 }
 
 //================================================================================
@@ -195,10 +162,10 @@ func (m *Monitor) getCheckInterval(info battery.BatteryInfo) int {
 // @param info Информация о батарее.
 func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 
-	// Если состояние батареи не изменилось, проверка пропускается.
+	// Логируем, если состояние батареи не изменилось, но продолжаем проверку пороговых значений
 	if m.isInitialized && info.CurrentCapacity == m.lastLevel && info.IsCharging == m.lastKnownCharging {
-		m.log.Debug("Состояние батареи не изменилось. Проверка пропущена.")
-		return
+		m.log.Debug("Состояние батареи не изменилось, но продолжаем проверку пороговых значений.")
+		// НЕ ВОЗВРАЩАЕМСЯ! Продолжаем проверку пороговых значений
 	}
 
 	// Информируем о текущем состоянии батареи.
@@ -207,7 +174,17 @@ func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 		info.IsCharging, info.CurrentCapacity,
 	))
 
-	// Запоминаем текущий уровень заряда.
+	// КРИТИЧНО: Проверяем пороговые значения ДО обновления lastLevel!
+	// Это позволяет корректно обрабатывать случай m.lastLevel == -1
+	if info.IsCharging {
+		// Если зарядка включена, проверяем состояние заряда.
+		m.checkChargingState(now, info)
+	} else {
+		// Если зарядка выключена, проверяем состояние разряда.
+		m.checkDischargingState(now, info)
+	}
+
+	// ТЕПЕРЬ запоминаем текущий уровень заряда ПОСЛЕ проверки порогов
 	m.lastLevel = info.CurrentCapacity
 
 	// Если это первая инициализация
@@ -219,15 +196,6 @@ func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 		m.log.Check("Обнаружена смена режима заряда. Состояние сброшено.\n")
 		m.resetState(info.IsCharging) // Сбрасываем состояние при смене режима заряда.
 	}
-
-	// Проверяем состояние заряда.
-	if info.IsCharging {
-		// Если зарядка включена, проверяем состояние заряда.
-		m.checkChargingState(now, info)
-	} else {
-		// Если зарядка выключена, проверяем состояние разряда.
-		m.checkDischargingState(now, info)
-	}
 	m.log.Info(fmt.Sprintf("Текущий интервал проверки: %d секунд", m.getCheckInterval(info)))
 }
 
@@ -235,107 +203,143 @@ func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 //
 // @param newChargingState Новое состояние зарядки.
 func (m *Monitor) resetState(newChargingState bool) {
-	m.lastNotificationTime = time.Time{}
-	m.notificationsRemaining = 0
 	m.lastKnownCharging = newChargingState
 	m.lastLevel = -1
 }
 
 // checkDischargingState проверяет, нужно ли отправлять уведомление при разрядке.
+// Отправляет уведомление на каждое снижение заряда на 1% до подключения зарядки.
 //
 // @param now Текущее время.
 // @param info Информация о батарее.
 func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo) {
 
-	// Отладочное сообщение для проверки порогов.
+	// Отладочное сообщение для проверки состояния разрядки
 	m.log.Debug(fmt.Sprintf(
-		"Проверка нижнего порога: Текущий заряд=%d%%, Мин. порог=%d%%",
-		info.CurrentCapacity, m.config.MinThreshold,
+		"Проверка разрядки: Текущий заряд=%d%%, LastLevel=%d, IsCharging=%t",
+		info.CurrentCapacity, m.lastLevel, info.IsCharging,
 	))
 
-	// Если уровень заряда выше порога, проверка пропускается.
-	if info.CurrentCapacity > m.config.MinThreshold {
+	// Если батарея заряжается, проверка разрядки не нужна
+	if info.IsCharging {
+		m.log.Debug("Батарея заряжается, проверка разрядки пропущена")
 		return
 	}
 
-	// Если количество уведомлений не превышено и время с последнего уведомления прошло
-	if m.notificationsRemaining < m.config.MaxNotifications && now.Sub(m.lastNotificationTime) >= time.Duration(m.config.NotificationInterval)*time.Second {
-		remaining := m.config.MaxNotifications - m.notificationsRemaining - 1 // Оставшееся количество уведомлений
-		// Формируем сообщение
+	level := info.CurrentCapacity
+	// Проверяем, снизился ли заряд на 1% или более при разрядке (зарядка НЕ подключена)
+	if m.lastLevel != -1 && level < m.lastLevel {
+
+		// Отправляем уведомление на каждый процент снижения заряда до достижения минимального порога
+		// for level := m.lastLevel - 1; level >= info.CurrentCapacity; level-- {
+		// Отправляем уведомление только если заряд выше минимального порога
+		// или если достигли минимального порога (критическое уведомление)
+		if level <= m.config.MinThreshold {
+			// Формируем сообщение в зависимости от уровня заряда
+			message := fmt.Sprintf(
+				"⚠️ КРИТИЧЕСКИЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nПожалуйста, срочно подключите зарядное устройство!",
+				level,
+			)
+
+			m.log.Info(fmt.Sprintf("🔋 ОТПРАВКА УВЕДОМЛЕНИЯ О РАЗРЯДКЕ: %d%%", level))
+			m.log.Check(message)
+
+			// Отображаем уведомление
+			if err := dialog.ShowLowBatteryNotification(message, m.log); err != nil {
+				m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о разрядке: %v", err))
+			} else {
+				m.log.Info(fmt.Sprintf("✅ Уведомление о разрядке (%d%%) успешно отправлено", level))
+			}
+		} else {
+			// Если заряд ниже минимального порога, прекращаем отправку уведомлений
+			m.log.Debug(fmt.Sprintf("Заряд %d%% ниже минимального порога %d%%, уведомления прекращены", level, m.config.MinThreshold))
+		}
+	} else if m.lastLevel == -1 && level <= m.config.MinThreshold {
+		// Первый запуск и заряд уже критический
 		message := fmt.Sprintf(
-			"Батарея разряжена до %d%%.\nПожалуйста, подключите зарядку.\nОсталось уведомлений: %d",
-			info.CurrentCapacity,
-			remaining,
+			"⚠️ КРИТИЧЕСКИЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nПожалуйста, срочно подключите зарядное устройство!",
+			level,
 		)
-		// Отправляем уведомление
+
+		m.log.Info(fmt.Sprintf("🔋 ОТПРАВКА УВЕДОМЛЕНИЯ О КРИТИЧЕСКОМ ЗАРЯДЕ (первый запуск): %d%%", level))
 		m.log.Check(message)
+
 		// Отображаем уведомление
 		if err := dialog.ShowLowBatteryNotification(message, m.log); err != nil {
-			m.log.Error(err.Error())
+			m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о критическом заряде: %v", err))
+		} else {
+			m.log.Info("✅ Уведомление о критическом заряде успешно отправлено")
 		}
-
-		m.lastNotificationTime = now    // Обновляем время последнего уведомления
-		m.notificationsRemaining++      // Увеличиваем счетчик уведомлений
-		m.updateDischargeInterval(info) // Обновляем интервал проверки при разрядке в случае, если уровень заряда ниже порога.
+	} else {
+		m.log.Debug(fmt.Sprintf("Условия для уведомления о разрядке не выполнены: level=%d, last=%d", level, m.lastLevel))
 	}
 }
 
 // checkChargingState проверяет, нужно ли отправлять уведомление при зарядке.
+// Отправляет уведомление на каждое увеличение заряда на 1% до отключения зарядки.
 //
 // @param now Текущее время.
 // @param info Информация о батарее.
 func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
-
-	// Отладочное сообщение для проверки порогов.
+	level := info.CurrentCapacity
+	// Отладочное сообщение для проверки состояния зарядки
 	m.log.Debug(fmt.Sprintf(
-		"Проверка верхнего порога: Текущий заряд=%d%%, Макс. порог=%d%%",
-		info.CurrentCapacity, m.config.MaxThreshold,
+		"Проверка зарядки: Текущий заряд=%d%%, LastLevel=%d, IsCharging=%t",
+		level, m.lastLevel, info.IsCharging,
 	))
 
-	// Если уровень заряда ниже порога, проверка пропускается.
-	if info.CurrentCapacity < m.config.MaxThreshold {
+	// Если батарея не заряжается, проверка зарядки не нужна
+	if !info.IsCharging {
+		m.log.Debug("Батарея не заряжается, проверка зарядки пропущена")
 		return
 	}
 
-	// Если количество уведомлений не превышено и время с последнего уведомления прошло
-	if m.notificationsRemaining < m.config.MaxNotifications && now.Sub(m.lastNotificationTime) >= time.Duration(m.config.NotificationInterval)*time.Second {
-		// Определяем количество оставшихся уведомлений.
-		remaining := m.config.MaxNotifications - m.notificationsRemaining - 1
-		// Формируем сообщение.
-		message := fmt.Sprintf(
-			"Батарея заряжена до %d%%.\nМожете отключить зарядку.\nОсталось уведомлений: %d",
-			info.CurrentCapacity,
-			remaining,
-		)
-		m.log.Check(message) // Отправляем уведомление.
-		if err := dialog.ShowHighBatteryNotification(message, m.log); err != nil {
-			m.log.Error(err.Error())
+	// Проверяем, увеличился ли заряд на 1% или более при зарядке (зарядка подключена)
+	if m.lastLevel != -1 && level > m.lastLevel {
+
+		// Отправляем уведомление на каждый процент увеличения заряда до достижения максимального порога
+		// for level := m.lastLevel + 1; level <= info.CurrentCapacity; level++ {
+		// Отправляем уведомление только если заряд ниже максимального порога
+		// или если достигли максимального порога (критическое уведомление)
+		if level >= m.config.MaxThreshold {
+			// Формируем сообщение в зависимости от уровня заряда
+			message := fmt.Sprintf(
+				"⚡ МАКСИМАЛЬНЫЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nРекомендуется отключить зарядное устройство для продления срока службы батареи.",
+				level,
+			)
+
+			m.log.Info(fmt.Sprintf("🔌 ОТПРАВКА УВЕДОМЛЕНИЯ О ЗАРЯДКЕ: %d%%", level))
+			m.log.Check(message)
+
+			// Отображаем уведомление
+			if err := dialog.ShowHighBatteryNotification(message, m.log); err != nil {
+				m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о зарядке: %v", err))
+			} else {
+				m.log.Info(fmt.Sprintf("✅ Уведомление о зарядке (%d%%) успешно отправлено", level))
+			}
+		} else {
+			m.log.Debug(fmt.Sprintf("Заряд %d%% ниже максимального порога %d%%, уведомления прекращены", level, m.config.MaxThreshold))
+			// break
 		}
+	} else if m.lastLevel == -1 && level >= m.config.MaxThreshold {
+		// Первый запуск и заряд уже максимальный
+		message := fmt.Sprintf(
+			"⚡ МАКСИМАЛЬНЫЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nРекомендуется отключить зарядное устройство для продления срока службы батареи.",
+			level,
+		)
 
-		m.lastNotificationTime = now // Обновляем время последнего уведомления.
-		m.notificationsRemaining++   // Увеличиваем счетчик уведомлений.
-		m.updateChargeInterval(info) // Обновляем интервал проверки при зарядке в случае, если достигнутый уровень заряда выше порога.
+		m.log.Info(fmt.Sprintf("🔌 ОТПРАВКА УВЕДОМЛЕНИЯ О МАКСИМАЛЬНОМ ЗАРЯДЕ (первый запуск): %d%%", level))
+		m.log.Check(message)
+
+		// Отображаем уведомление
+		if err := dialog.ShowHighBatteryNotification(message, m.log); err != nil {
+			m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о максимальном заряде: %v", err))
+		} else {
+			m.log.Info("✅ Уведомление о максимальном заряде успешно отправлено")
+		}
+	} else {
+		m.log.Debug(fmt.Sprintf("Условия для уведомления о зарядке не выполнены: level=%d, last=%d", level, m.lastLevel))
 	}
-}
-
-// updateDischargeInterval обновляет интервал проверки при разрядке.
-//
-// @param info Информация о батарее.
-func (m *Monitor) updateDischargeInterval(info battery.BatteryInfo) {
-	gapCapacity := m.config.MinThreshold - info.CurrentCapacity                                          // Разница между минимальным порогом и текущим уровнем заряда.
-	timeTick := m.config.CheckIntervalWhenDischarging / m.config.MinThreshold                            // Единица интервала проверки.
-	m.config.CheckIntervalWhenDischarging = m.config.CheckIntervalWhenDischarging - timeTick*gapCapacity // Уменьшаем интервал проверки пропорционально разнице.
-	m.cfgManager.Save(&m.config)                                                                         // Сохраняем конфигурацию в файле конфигурации.
-}
-
-// updateChargeInterval обновляет интервал проверки при зарядке.
-//
-// @param info Информация о батарее.
-func (m *Monitor) updateChargeInterval(info battery.BatteryInfo) {
-	gapCapacity := m.config.MaxThreshold - info.CurrentCapacity                                   // Разница между максимальным порогом и текущим уровнем заряда.
-	timeBit := m.config.CheckIntervalWhenCharging / m.config.MaxThreshold                         // Единица интервала проверки.
-	m.config.CheckIntervalWhenCharging = m.config.CheckIntervalWhenCharging - timeBit*gapCapacity // Уменьшаем интервал проверки пропорционально разнице.
-	m.cfgManager.Save(&m.config)                                                                  // Сохраняем конфигурацию в файле конфигурации.
 }
 
 // Stop останавливает работу монитора.

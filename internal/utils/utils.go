@@ -69,14 +69,14 @@ func GetMaxLabelLength(labels []string) int {
 	return maxLength
 }
 
-// FormatTimeToHMS конвертирует количество секунд в строку
-// «HHч MMм SSс» или «MMм SSс», если часов = 0.
+// FormatTimeToColonHMS конвертирует количество минут в строку
+// «HHч MMм» или «--ч --м», если минут = 0.
 //
-// @param seconds Количество секунд
-// @return string Строка формата «1ч 23м 45с» либо «05м 12с»
+// @param minutes Количество минут
+// @return string Строка формата «1ч 23м» либо «--ч --м» при нулевом значении
 func FormatTimeToColonHMS(minutes int) string {
-	if minutes < 0 {
-		minutes = 0
+	if minutes <= 0 {
+		return "--ч --м"
 	}
 	h := minutes / 60
 	m := minutes % 60

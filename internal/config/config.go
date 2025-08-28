@@ -32,8 +32,6 @@ type Config struct {
 	MaxThreshold                 int    `json:"max_threshold"`              // Максимальный порог заряда
 	CheckIntervalWhenCharging    int    `json:"check_interval_charging"`    // Интервал проверки при зарядке
 	CheckIntervalWhenDischarging int    `json:"check_interval_discharging"` // Интервал проверки при разрядке
-	NotificationInterval         int    `json:"notification_interval"`      // Интервал уведомлений
-	MaxNotifications             int    `json:"max_notifications"`          // Максимальное количество уведомлений
 	DebugEnabled                 bool   `json:"debug_enabled"`              // Включить отладку
 	LogFilePath                  string `json:"log_file_path"`              // Путь к файлу логов
 	LogRotationLines             int    `json:"log_rotation_lines"`         // Количество строк в файле логов
@@ -79,12 +77,10 @@ func Default() *Config {
 	return &Config{
 		MinThreshold:                 21,
 		MaxThreshold:                 81,
-		NotificationInterval:         1800, // ИЗМЕНЕНИЕ: 30 минут = 1800 секунд
-		MaxNotifications:             3,
 		LogFilePath:                  paths.LogPath(),
 		LogRotationLines:             1000,
-		CheckIntervalWhenCharging:    30,   // ИЗМЕНЕНИЕ: 30 секунд
-		CheckIntervalWhenDischarging: 1800, // ИЗМЕНЕНИЕ: 30 минут = 1800 секунд
+		CheckIntervalWhenCharging:    30,   // 30 секунд
+		CheckIntervalWhenDischarging: 1800, // 30 минут = 1800 секунд
 		LogEnabled:                   true,
 		RunAtLoad:                    true,
 		DebugEnabled:                 false,
@@ -206,16 +202,6 @@ func (m *Manager) mergeWithDefaults(loaded *Config, presenceMap map[string]inter
 	if !keyExists("check_interval_discharging") {
 		m.log.Debug(fmt.Sprintf("Поле 'check_interval_discharging' отсутствует. Установлено значение по умолчанию: %v", defaultCfg.CheckIntervalWhenDischarging))
 		loaded.CheckIntervalWhenDischarging = defaultCfg.CheckIntervalWhenDischarging
-		changesMade = true
-	}
-	if !keyExists("notification_interval") {
-		m.log.Debug(fmt.Sprintf("Поле 'notification_interval' отсутствует. Установлено значение по умолчанию: %v", defaultCfg.NotificationInterval))
-		loaded.NotificationInterval = defaultCfg.NotificationInterval
-		changesMade = true
-	}
-	if !keyExists("max_notifications") {
-		m.log.Debug(fmt.Sprintf("Поле 'max_notifications' отсутствует. Установлено значение по умолчанию: %d", defaultCfg.MaxNotifications))
-		loaded.MaxNotifications = defaultCfg.MaxNotifications
 		changesMade = true
 	}
 	if !keyExists("debug_enabled") {

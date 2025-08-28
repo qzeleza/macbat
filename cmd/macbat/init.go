@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 
 	"net/mail"
@@ -35,12 +34,6 @@ type App struct {
 	run        *commands.Commands // Команды
 	cfg        *config.Config     // Конфигурация
 	cfgManager *config.Manager    // Менеджер конфигурации
-}
-
-// init выполняет начальную инициализацию при импорте пакета
-func init() {
-	// Привязываем горутину к главному потоку ОС для GUI
-	runtime.LockOSThread()
 }
 
 // NewApp создает и инициализирует новое приложение

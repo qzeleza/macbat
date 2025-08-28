@@ -65,3 +65,8 @@ local.*
 
 # TASK AI
 *.ai
+.claude/
+_backup/
+.windsurf/
+.vscode/
+.idea/

@@ -1,10 +1,8 @@
 {
-  "min_threshold": 78,
-  "max_threshold": 81,
+  "min_threshold": 20,
+  "max_threshold": 99,
   "check_interval_charging": 60,
   "check_interval_discharging": 1326,
-  "notification_interval": 1800,
-  "max_notifications": 3,
   "debug_enabled": true,
   "log_file_path": "/tmp/macbat.log",
   "log_rotation_lines": 1000,

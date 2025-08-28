@@ -87,7 +87,7 @@ next-tag: ## Сформировать новый тег (увеличивает 
 	git push origin $$NEW_TAG; \
 	echo "$(GREEN)Тег $$NEW_TAG создан и отправлен$(NC)"
 
-# Цель: publish – полный цикл публикации релиза на GitHub
+# Цель: prod – полный цикл публикации релиза на GitHub
 # 1. Сборка релизного бинарника (make release)
 # 2. Создание тега версии и пуш в origin
 # 3. Создание релиза через gh cli и загрузка бинарника
@@ -95,7 +95,7 @@ next-tag: ## Сформировать новый тег (увеличивает 
 # 5. Обновление Homebrew formula macbat.rb (version + sha256)
 # 6. Коммит formula и пуш в origin
 # Требования: установлен GitHub CLI (`gh`) и переменная окружения GH_TOKEN с правами на репозиторий.
-publish: release next-tag ## Сформировать релиз, выложить на GitHub и обновить Homebrew formula
+prod: release next-tag ## Сформировать релиз, выложить на GitHub и обновить Homebrew formula
 	
 	@echo "$(YELLOW)▶️  Публикация релиза $(VERSION)$(NC)"
 	@if ! $(GH) auth status >/dev/null 2>&1; then \

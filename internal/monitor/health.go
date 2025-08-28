@@ -38,8 +38,6 @@ func IsAppInstalled(log *logger.Logger) bool {
 		paths.ConfigPath(): {
 			"min_threshold", // Ищем ошибки в системном логе
 			"max_threshold",
-			"notification_interval",
-			"max_notifications",
 			"log_file_path",
 			"log_rotation_lines",
 			"check_interval_charging",
