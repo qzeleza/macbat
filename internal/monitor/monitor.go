@@ -62,6 +62,11 @@ type Monitor struct {
 	stopChan          chan struct{}
 }
 
+const (
+	// defaultMonitorIntervalSeconds используется, когда конфигурация задаёт некорректные интервалы (<= 0).
+	defaultMonitorIntervalSeconds = 30
+)
+
 //================================================================================
 // ОСНОВНАЯ ЛОГИКА МОНИТОРИНГА
 //================================================================================
@@ -102,12 +107,19 @@ func (m *Monitor) Start(mode string, started chan<- struct{}) {
 	getInfo = battery.GetBatteryInfo
 	// }
 
-	// Получаем начальный интервал проверки на основе состояния зарядки
-	// Если зарядка включена, то начальный интервал равен значению переменной CheckIntervalWhenCharging,
-	// а если зарядка выключена, то начальный интервал равен значению переменной CheckIntervalWhenDischarging.
-	initialInterval := time.Duration(m.getCheckInterval(battery.BatteryInfo{})) * time.Second
-	ticker := time.NewTicker(initialInterval) // Создаем тикер с начальным интервалом проверки
-	m.log.Info(fmt.Sprintf("Мониторинг запущен. Текущий интервал проверки: %d секунд", m.getCheckInterval(battery.BatteryInfo{})))
+	// Немедленно получаем данные, чтобы не ждать первого тика.
+	initialInfo, err := getInfo()
+	if err != nil {
+		m.log.Error(fmt.Sprintf("Не удалось получить первичную информацию о батарее: %v", err))
+	}
+
+	if initialInfo != nil {
+		m.Check(time.Now(), *initialInfo)
+	}
+
+	initialInterval := m.safeInterval(m.intervalForInfo(initialInfo))
+	ticker := time.NewTicker(initialInterval)
+	m.log.Info(fmt.Sprintf("Мониторинг запущен. Текущий интервал проверки: %s", initialInterval))
 
 	// Сигнализируем, что монитор запущен.
 	if started != nil {
@@ -127,9 +139,10 @@ func (m *Monitor) Start(mode string, started chan<- struct{}) {
 			// Выполняем проверку состояния батареи и соблюдения порогов
 			m.Check(now, *info)
 			// После проверки обновляем интервал тикера, т.к. режим заряда мог измениться.
-			ticker.Reset(time.Duration(m.getCheckInterval(*info)) * time.Second)
+			nextInterval := m.safeInterval(m.intervalForInfo(info))
+			ticker.Reset(nextInterval)
 			m.log.Line()
-			m.log.Info(fmt.Sprintf("Текущий интервал проверки: %d секунд", m.getCheckInterval(*info)))
+			m.log.Info(fmt.Sprintf("Текущий интервал проверки: %s", nextInterval))
 			m.log.Info(fmt.Sprintf("Текущий уровень заряда: %d%%", info.CurrentCapacity))
 			m.log.Info(fmt.Sprintf("Текущее состояние зарядки: %v", info.IsCharging))
 			m.log.Info(fmt.Sprintf("Текущее состояние подключения к сети: %v", info.IsPlugged))
@@ -142,6 +155,23 @@ func (m *Monitor) Start(mode string, started chan<- struct{}) {
 			return
 		}
 	}
+}
+
+// intervalForInfo подбирает интервал опроса на основании состояния батареи.
+func (m *Monitor) intervalForInfo(info *battery.BatteryInfo) time.Duration {
+	if info == nil {
+		return time.Duration(m.config.CheckIntervalWhenDischarging) * time.Second
+	}
+	return time.Duration(m.getCheckInterval(*info)) * time.Second
+}
+
+// safeInterval заменяет нулевые и отрицательные интервалы на значение по умолчанию.
+func (m *Monitor) safeInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		m.log.Debug(fmt.Sprintf("Интервал %s некорректен, используется значение по умолчанию %dс", interval, defaultMonitorIntervalSeconds))
+		return time.Duration(defaultMonitorIntervalSeconds) * time.Second
+	}
+	return interval
 }
 
 // getCheckInterval определяет текущий интервал проверки на основе состояния зарядки.
@@ -227,34 +257,39 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 	}
 
 	level := info.CurrentCapacity
-	// Проверяем, снизился ли заряд на 1% или более при разрядке (зарядка НЕ подключена)
+
+	// Новый блок: уведомления на каждый -1% при разрядке
 	if m.lastLevel != -1 && level < m.lastLevel {
-
-		// Отправляем уведомление на каждый процент снижения заряда до достижения минимального порога
-		// for level := m.lastLevel - 1; level >= info.CurrentCapacity; level-- {
-		// Отправляем уведомление только если заряд выше минимального порога
-		// или если достигли минимального порога (критическое уведомление)
-		if level <= m.config.MinThreshold {
-			// Формируем сообщение в зависимости от уровня заряда
-			message := fmt.Sprintf(
-				"⚠️ КРИТИЧЕСКИЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nПожалуйста, срочно подключите зарядное устройство!",
-				level,
-			)
-
-			m.log.Info(fmt.Sprintf("🔋 ОТПРАВКА УВЕДОМЛЕНИЯ О РАЗРЯДКЕ: %d%%", level))
-			m.log.Check(message)
-
-			// Отображаем уведомление
-			if err := dialog.ShowLowBatteryNotification(message, m.log); err != nil {
-				m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о разрядке: %v", err))
+		// Проходим по каждому проценту снижения заряда
+		for p := m.lastLevel - 1; p >= level; p-- {
+			if p <= m.config.MinThreshold {
+				// Критический уровень — используем специальное уведомление
+				message := fmt.Sprintf(
+					"⚠️ КРИТИЧЕСКИЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nПожалуйста, срочно подключите зарядное устройство!",
+					p,
+				)
+				m.log.Info(fmt.Sprintf("🔋 ОТПРАВКА УВЕДОМЛЕНИЯ О РАЗРЯДКЕ: %d%%", p))
+				m.log.Check(message)
+				if err := dialog.ShowLowBatteryNotification(message, m.log); err != nil {
+					m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о разрядке: %v", err))
+				} else {
+					m.log.Info(fmt.Sprintf("✅ Уведомление о разрядке (%d%%) успешно отправлено", p))
+				}
 			} else {
-				m.log.Info(fmt.Sprintf("✅ Уведомление о разрядке (%d%%) успешно отправлено", level))
+				// Нейтральное уведомление об изменении уровня заряда на 1%
+				title := "Изменение уровня заряда"
+				message := fmt.Sprintf("Уровень батареи: %d%% (разрядка)", p)
+				m.log.Info(fmt.Sprintf("🔋 Уведомление: разрядка до %d%%", p))
+				if err := dialog.ShowDialogNotification(title, message, m.log); err != nil {
+					m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о разрядке: %v", err))
+				}
 			}
-		} else {
-			// Если заряд ниже минимального порога, прекращаем отправку уведомлений
-			m.log.Debug(fmt.Sprintf("Заряд %d%% ниже минимального порога %d%%, уведомления прекращены", level, m.config.MinThreshold))
 		}
-	} else if m.lastLevel == -1 && level <= m.config.MinThreshold {
+		return
+	}
+
+	// Старый сценарий первого запуска, когда уже в критической зоне
+	if m.lastLevel == -1 && level <= m.config.MinThreshold {
 		// Первый запуск и заряд уже критический
 		message := fmt.Sprintf(
 			"⚠️ КРИТИЧЕСКИЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nПожалуйста, срочно подключите зарядное устройство!",
@@ -296,31 +331,32 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 
 	// Проверяем, увеличился ли заряд на 1% или более при зарядке (зарядка подключена)
 	if m.lastLevel != -1 && level > m.lastLevel {
-
-		// Отправляем уведомление на каждый процент увеличения заряда до достижения максимального порога
-		// for level := m.lastLevel + 1; level <= info.CurrentCapacity; level++ {
-		// Отправляем уведомление только если заряд ниже максимального порога
-		// или если достигли максимального порога (критическое уведомление)
-		if level >= m.config.MaxThreshold {
-			// Формируем сообщение в зависимости от уровня заряда
-			message := fmt.Sprintf(
-				"⚡ МАКСИМАЛЬНЫЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nРекомендуется отключить зарядное устройство для продления срока службы батареи.",
-				level,
-			)
-
-			m.log.Info(fmt.Sprintf("🔌 ОТПРАВКА УВЕДОМЛЕНИЯ О ЗАРЯДКЕ: %d%%", level))
-			m.log.Check(message)
-
-			// Отображаем уведомление
-			if err := dialog.ShowHighBatteryNotification(message, m.log); err != nil {
-				m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о зарядке: %v", err))
+		// Отправляем уведомления на каждый процент увеличения заряда
+		for p := m.lastLevel + 1; p <= level; p++ {
+			if p >= m.config.MaxThreshold {
+				// Критически высокий уровень заряда
+				message := fmt.Sprintf(
+					"⚡ МАКСИМАЛЬНЫЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nРекомендуется отключить зарядное устройство для продления срока службы батареи.",
+					p,
+				)
+				m.log.Info(fmt.Sprintf("🔌 ОТПРАВКА УВЕДОМЛЕНИЯ О ЗАРЯДКЕ: %d%%", p))
+				m.log.Check(message)
+				if err := dialog.ShowHighBatteryNotification(message, m.log); err != nil {
+					m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о зарядке: %v", err))
+				} else {
+					m.log.Info(fmt.Sprintf("✅ Уведомление о зарядке (%d%%) успешно отправлено", p))
+				}
 			} else {
-				m.log.Info(fmt.Sprintf("✅ Уведомление о зарядке (%d%%) успешно отправлено", level))
+				// Нейтральное уведомление об изменении уровня заряда
+				title := "Изменение уровня заряда"
+				message := fmt.Sprintf("Уровень батареи: %d%% (зарядка)", p)
+				m.log.Info(fmt.Sprintf("🔌 Уведомление: зарядка до %d%%", p))
+				if err := dialog.ShowDialogNotification(title, message, m.log); err != nil {
+					m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о зарядке: %v", err))
+				}
 			}
-		} else {
-			m.log.Debug(fmt.Sprintf("Заряд %d%% ниже максимального порога %d%%, уведомления прекращены", level, m.config.MaxThreshold))
-			// break
 		}
+		return
 	} else if m.lastLevel == -1 && level >= m.config.MaxThreshold {
 		// Первый запуск и заряд уже максимальный
 		message := fmt.Sprintf(

@@ -16,13 +16,7 @@ const AppName = "macbat"
 // BinaryPath возвращает путь к бинарному файлу приложения.
 // @return string - путь к бинарнику
 func BinaryPath() string {
-	// os.Executable() возвращает полный путь к текущему исполняемому файлу.
-	// Это именно то, что нужно для запуска копии процесса.
-	// binPath, err := os.Executable()
-	// if err != nil {
-	// 	// В случае ошибки возвращаем базовое имя, предполагая, что оно в PATH.
-	// 	return AppName
-	// }
+	// Жестко прописанный путь для Homebrew установки
 	return filepath.Join("/opt/homebrew/bin", AppName)
 }
 

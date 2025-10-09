@@ -46,6 +46,11 @@ type Tray struct {
 	updateMu          sync.Mutex          // Мьютекс для защиты обновления меню
 }
 
+const (
+	// minTrayRefreshSeconds задаёт минимально допустимый интервал обновления информации в трее.
+	minTrayRefreshSeconds = 15
+)
+
 // New создает новый экземпляр Tray.
 func New(appLog *logger.Logger, cfg *config.Config, cfgManager *config.Manager, bgManager *background.Manager) *Tray {
 	return &Tray{
@@ -70,8 +75,8 @@ func (t *Tray) onExit() {
 // обработку кликов, а также запускает периодические обновления меню.
 func (t *Tray) onReady() {
 
-	// Устанавливаем иконку для системного меню
-	systray.SetTitle("🔋👀") // Заголовок в виде эмодзи
+	// Устанавливаем начальный заголовок для системного меню
+	systray.SetTitle("--% 👀") // Заголовок будет обновлен в updateMenu
 	systray.SetTooltip("Управление macbat")
 
 	// --- Создание элементов меню ---
@@ -117,20 +122,57 @@ func (t *Tray) onReady() {
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Выход", "Закрыть приложение")
 
-	// Запускаем горутину для обновления меню каждые 5 секунд
+	// Запускаем горутину для обновления меню с динамическим интервалом
 	go func() {
-		runtime.LockOSThread()                    // ➊ работаем всегда в одном ОС-потоке
-		ticker := time.NewTicker(5 * time.Second) // ➋ каждые 5 секунд
-		defer ticker.Stop()                       // ➌ останавливаем тикер при завершении горутины
+		runtime.LockOSThread() // ➊ работаем всегда в одном ОС-потоке
+
+		// Первое обновление сразу при запуске
+		t.updateMenu()
+
+		// Получаем начальный интервал обновления
+		interval := t.getUpdateInterval()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 
 		for range ticker.C {
 			t.updateMenu() // ➋ обращаемся к IOKit в «правильном» потоке и обновляем меню
-		}
 
+			// Проверяем, нужно ли изменить интервал обновления
+			newInterval := t.getUpdateInterval()
+			if newInterval != interval {
+				interval = newInterval
+				ticker.Reset(interval)
+				t.log.Debug(fmt.Sprintf("Интервал обновления меню изменён на %v", interval))
+			}
+		}
 	}()
 
 	// Запускаем горутину для обработки кликов
 	go t.handleMenuClicks(t.mSettings, t.mLogs, t.mConfig, mQuit)
+}
+
+// getUpdateInterval возвращает интервал обновления меню в зависимости от режима зарядки.
+func (t *Tray) getUpdateInterval() time.Duration {
+	// Получаем информацию о батарее для определения режима
+	info, err := battery.GetBatteryInfo()
+	if err != nil {
+		// В случае ошибки используем безопасный интервал по умолчанию
+		return time.Duration(minTrayRefreshSeconds) * time.Second
+	}
+
+	// Возвращаем интервал в зависимости от состояния зарядки
+	if info.IsCharging {
+		return clampTrayInterval(t.cfg.CheckIntervalWhenCharging)
+	}
+	return clampTrayInterval(t.cfg.CheckIntervalWhenDischarging)
+}
+
+// clampTrayInterval приводит значение к минимально допустимому интервалу, защищая от слишком редких обновлений.
+func clampTrayInterval(seconds int) time.Duration {
+	if seconds <= 0 || seconds > minTrayRefreshSeconds {
+		seconds = minTrayRefreshSeconds
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // updateMenu обновляет меню приложения с информацией о текущем состоянии
@@ -153,6 +195,13 @@ func (t *Tray) updateMenu() {
 	// Получаем пороги из конфигурации
 	minThreshold := t.cfg.MinThreshold
 	maxThreshold := t.cfg.MaxThreshold
+
+	// Обновляем заголовок в строке меню с процентами заряда
+	titleIcon := ""
+	if info.IsCharging {
+		titleIcon = "⚡" // Иконка зарядки
+	}
+	systray.SetTitle(fmt.Sprintf("%d%% %s👀", info.CurrentCapacity, titleIcon))
 
 	t.mVersion.SetTitle("Версия приложения macbat " + version.Version)
 	// Обновляем заголовок с иконкой батареи
@@ -218,7 +267,7 @@ func getMinThresholdIndicator(threshold int) string {
 	switch {
 	case threshold <= 10:
 		return "🔴" // Оптимально0
-	case threshold >= 11 || threshold <= 20:
+	case threshold <= 20:
 		return "🟡" // Оптимально
 	case threshold <= 28:
 		return "🟢" // Оптимально
@@ -263,6 +312,28 @@ func getCyclesIndicator(cycles int) string {
 	default:
 		return "🔴" // Высокое
 	}
+}
+
+// restartBackgroundProcess перезагружает фоновый процесс мониторинга батареи.
+// Эта функция завершает текущий процесс и запускает новый для применения обновленной конфигурации.
+func (t *Tray) restartBackgroundProcess() {
+	t.log.Info("Перезагрузка фонового процесса для применения новых настроек...")
+
+	// Останавливаем текущий фоновый процесс
+	if err := t.bgManager.Kill("--background"); err != nil {
+		t.log.Error(fmt.Sprintf("Ошибка при остановке фонового процесса: %v", err))
+		dlgs.Warning("Предупреждение", "Не удалось корректно остановить фоновый процесс. Попробуйте перезапустить приложение вручную.")
+		return
+	}
+
+	// Небольшая задержка для гарантии завершения процесса
+	time.Sleep(500 * time.Millisecond)
+
+	// Запускаем новый фоновый процесс с обновленной конфигурацией
+	t.bgManager.LaunchDetached("--background")
+
+	t.log.Info("Фоновый процесс успешно перезагружен с новыми настройками")
+	dlgs.Info("Успешно", "Настройки применены. Фоновый процесс перезапущен.")
 }
 
 // getBatteryIcon возвращает иконку батареи в зависимости от уровня заряда
@@ -418,6 +489,8 @@ func (t *Tray) handleIntegerConfigChange(key, title, prompt string) {
 		t.log.Error("Ошибка сохранения конфигурации: " + err.Error())
 	} else {
 		t.log.Info(fmt.Sprintf("Значение успешно обновлено на %d.", newValue))
+		// Перезагружаем фоновый процесс для применения новых настроек
+		t.restartBackgroundProcess()
 	}
 	t.updateMenu()
 }
@@ -483,6 +556,8 @@ func (t *Tray) handleThresholdChange(mode string) {
 		dlgs.Error("Ошибка сохранения", "Не удалось сохранить новую конфигурацию: "+err.Error())
 	} else {
 		t.log.Info("Успешное сохранение порога " + mode + "= " + strconv.Itoa(newVal) + ".")
+		// Перезагружаем фоновый процесс для применения новых настроек
+		t.restartBackgroundProcess()
 		// Обновляем меню немедленно, чтобы показать изменения
 		t.updateMenu()
 	}

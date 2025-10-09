@@ -79,8 +79,8 @@ func Default() *Config {
 		MaxThreshold:                 81,
 		LogFilePath:                  paths.LogPath(),
 		LogRotationLines:             1000,
-		CheckIntervalWhenCharging:    30,   // 30 секунд
-		CheckIntervalWhenDischarging: 1800, // 30 минут = 1800 секунд
+		CheckIntervalWhenCharging:    15,   // 15 секунд — частые обновления при зарядке
+		CheckIntervalWhenDischarging: 15,   // 15 секунд — частые обновления при разрядке
 		LogEnabled:                   true,
 		RunAtLoad:                    true,
 		DebugEnabled:                 false,
