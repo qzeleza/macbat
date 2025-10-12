@@ -147,10 +147,11 @@ prod: release next-tag ## Сформировать релиз, выложить 
 	(cd $$TMP && git add Formula/$(BINARY_NAME).rb && git commit -m '$(BINARY_NAME) $(VERSION) (bin)' && git push origin HEAD); \
 	rm -rf $$TMP; \
 	echo "$(GREEN)✅ Релиз $(VERSION) с бинарниками опубликован$(NC)"; \
-	brew update; \
-	brew upgrade $(BINARY_NAME); \
-	echo "$(GREEN)✅ $(BINARY_NAME) обновлён$(NC)"; \
-	echo "Вам необходимо выйти из $(BINARY_NAME) в трее и запустить его снова, чтобы изменения вступили в силу."
+	brew update 2>/dev/null || true; \
+	brew upgrade $(BINARY_NAME) 2>/dev/null || true; \
+	killall -KILL $(BINARY_NAME) 2>/dev/null || true; \
+	$(BINARY_NAME); \
+	echo "$(GREEN)✅ $(BINARY_NAME) обновлён и запущен$(NC)"
 
 build: ## Собрать бинарный файл с информацией о версии
 	@echo "$(GREEN)Сборка $(BINARY_NAME)...$(NC)"
