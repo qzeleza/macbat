@@ -83,8 +83,8 @@ func GetBatteryInfo() (*BatteryInfo, error) {
 		TimeToFull:      int(cInfo.timeToFull),
 	}
 
-	// Конвертируем текущий заряд из мА·ч в проценты от максимальной ёмкости.
-	if info.MaxCapacity > 0 {
+	// Конвертируем текущий заряд в проценты, только если значение явно в мА·ч.
+	if info.MaxCapacity > 0 && info.CurrentCapacity > 100 {
 		percent := math.Round(float64(info.CurrentCapacity) * 100 / float64(info.MaxCapacity))
 		if percent < 0 {
 			percent = 0
