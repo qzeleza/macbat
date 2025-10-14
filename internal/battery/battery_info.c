@@ -92,10 +92,9 @@ BatteryInfo getBatteryInfo()
             CFNumberRef rawMaxCap = CFDictionaryGetValue(properties, CFSTR("AppleRawMaxCapacity"));
             if (rawMaxCap)
             {
-                int rawMaxCapacity = 0;
-                CFNumberGetValue(rawMaxCap, kCFNumberIntType, &rawMaxCapacity);
+                CFNumberGetValue(rawMaxCap, kCFNumberIntType, &info.rawMaxCapacity);
                 if (info.maxCapacity == 0)
-                    info.maxCapacity = rawMaxCapacity;
+                    info.maxCapacity = info.rawMaxCapacity;
             }
 
             // Проектная емкость

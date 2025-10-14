@@ -47,6 +47,7 @@ import "C"
 type BatteryInfo struct {
 	CurrentCapacity int  // Текущий заряд в процентах
 	MaxCapacity     int  // Максимальная емкость
+	RawMaxCapacity  int  // Максимальная емкость по данным IORegistry (сырое значение)
 	DesignCapacity  int  // Проектная емкость
 	CycleCount      int  // Количество циклов зарядки
 	Voltage         int  // Напряжение в мВ
@@ -73,6 +74,7 @@ func GetBatteryInfo() (*BatteryInfo, error) {
 	info := &BatteryInfo{
 		CurrentCapacity: int(cInfo.currentCapacity),
 		MaxCapacity:     int(cInfo.maxCapacity),
+		RawMaxCapacity:  int(cInfo.rawMaxCapacity),
 		DesignCapacity:  int(cInfo.designCapacity),
 		CycleCount:      int(cInfo.cycleCount),
 		Voltage:         int(cInfo.voltage),
@@ -84,9 +86,14 @@ func GetBatteryInfo() (*BatteryInfo, error) {
 	}
 
 	// Приводим значения к процентам, если получены "сырые" единицы (мА·ч).
-	if info.MaxCapacity > 0 &&
-		(info.CurrentCapacity > info.MaxCapacity || info.CurrentCapacity > 100 || info.MaxCapacity > 100) {
-		percent := math.Round(float64(info.CurrentCapacity) * 100 / float64(info.MaxCapacity))
+	maxForPercent := info.MaxCapacity
+	if maxForPercent <= 0 && info.RawMaxCapacity > 0 {
+		maxForPercent = info.RawMaxCapacity
+	}
+
+	if maxForPercent > 0 &&
+		(info.CurrentCapacity > maxForPercent || info.CurrentCapacity > 100 || maxForPercent > 100) {
+		percent := math.Round(float64(info.CurrentCapacity) * 100 / float64(maxForPercent))
 		if percent < 0 {
 			percent = 0
 		}
@@ -105,8 +112,12 @@ func GetBatteryInfo() (*BatteryInfo, error) {
 	}
 
 	// Рассчитываем здоровье батареи
-	if info.DesignCapacity > 0 && info.MaxCapacity > 0 {
-		health := math.Round(float64(info.MaxCapacity) * 100 / float64(info.DesignCapacity))
+	rawCapacity := info.RawMaxCapacity
+	if rawCapacity <= 0 {
+		rawCapacity = info.MaxCapacity
+	}
+	if info.DesignCapacity > 0 && rawCapacity > 0 {
+		health := math.Round(float64(rawCapacity) * 100 / float64(info.DesignCapacity))
 		if health < 0 {
 			health = 0
 		}
