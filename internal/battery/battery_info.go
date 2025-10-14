@@ -83,8 +83,9 @@ func GetBatteryInfo() (*BatteryInfo, error) {
 		TimeToFull:      int(cInfo.timeToFull),
 	}
 
-	// Конвертируем текущий заряд в проценты, только если значение явно в мА·ч.
-	if info.MaxCapacity > 0 && info.CurrentCapacity > 100 {
+	// Приводим значения к процентам, если получены "сырые" единицы (мА·ч).
+	if info.MaxCapacity > 0 &&
+		(info.CurrentCapacity > info.MaxCapacity || info.CurrentCapacity > 100 || info.MaxCapacity > 100) {
 		percent := math.Round(float64(info.CurrentCapacity) * 100 / float64(info.MaxCapacity))
 		if percent < 0 {
 			percent = 0
@@ -95,9 +96,24 @@ func GetBatteryInfo() (*BatteryInfo, error) {
 		info.CurrentCapacity = int(percent)
 	}
 
+	// Дополнительная защита от значений вне диапазона.
+	if info.CurrentCapacity < 0 {
+		info.CurrentCapacity = 0
+	}
+	if info.CurrentCapacity > 100 {
+		info.CurrentCapacity = 100
+	}
+
 	// Рассчитываем здоровье батареи
-	if info.DesignCapacity > 0 {
-		info.HealthPercent = int(float64(info.MaxCapacity) * 100 / float64(info.DesignCapacity))
+	if info.DesignCapacity > 0 && info.MaxCapacity > 0 {
+		health := math.Round(float64(info.MaxCapacity) * 100 / float64(info.DesignCapacity))
+		if health < 0 {
+			health = 0
+		}
+		if health > 100 {
+			health = 100
+		}
+		info.HealthPercent = int(health)
 	}
 
 	// Валидация данных

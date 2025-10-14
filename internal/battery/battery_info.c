@@ -40,10 +40,10 @@ BatteryInfo getBatteryInfo()
             if (currentCap)
                 CFNumberGetValue(currentCap, kCFNumberIntType, &info.currentCapacity);
 
-            // Максимальная емкость
-            // CFNumberRef maxCap = CFDictionaryGetValue(description, CFSTR(kIOPSMaxCapacityKey));
-            // if (maxCap)
-            //     CFNumberGetValue(maxCap, kCFNumberIntType, &info.maxCapacity);
+            // Максимальная емкость (текущая "полная зарядка")
+            CFNumberRef maxCap = CFDictionaryGetValue(description, CFSTR(kIOPSMaxCapacityKey));
+            if (maxCap)
+                CFNumberGetValue(maxCap, kCFNumberIntType, &info.maxCapacity);
 
             // Статус зарядки
             CFTypeRef isCharging = CFDictionaryGetValue(description, CFSTR(kIOPSIsChargingKey));
@@ -88,10 +88,15 @@ BatteryInfo getBatteryInfo()
                                               kCFAllocatorDefault, kNilOptions) == KERN_SUCCESS)
         {
 
-            // Максимальная емкость батареи в mAh, которую она может удерживать в текущем состоянии.
-            CFNumberRef maxCap = CFDictionaryGetValue(properties, CFSTR("AppleRawMaxCapacity"));
-            if (maxCap)
-                CFNumberGetValue(maxCap, kCFNumberIntType, &info.maxCapacity);
+            // Текущая максимальная емкость, если не удалось получить из IOPS
+            CFNumberRef rawMaxCap = CFDictionaryGetValue(properties, CFSTR("AppleRawMaxCapacity"));
+            if (rawMaxCap)
+            {
+                int rawMaxCapacity = 0;
+                CFNumberGetValue(rawMaxCap, kCFNumberIntType, &rawMaxCapacity);
+                if (info.maxCapacity == 0)
+                    info.maxCapacity = rawMaxCapacity;
+            }
 
             // Проектная емкость
             CFNumberRef designCap = CFDictionaryGetValue(properties, CFSTR("DesignCapacity"));
