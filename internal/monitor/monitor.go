@@ -59,6 +59,7 @@ type Monitor struct {
 	lastKnownCharging bool            // Последнее известное состояние (заряжается/не заряжается).
 	isInitialized     bool            // Флаг, показывающий, был ли монитор запущен хотя бы раз.
 	lastLevel         int             // Последний известный уровень заряда для оптимизации.
+	lastDirection     int             // Направление изменения уровня: -1 (падение), 0 (нет изменений), 1 (рост).
 	stopChan          chan struct{}
 }
 
@@ -258,17 +259,31 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 
 	level := info.CurrentCapacity
 
-	// Проверяем, пересекли ли мы порог min_threshold при разрядке
-	// Уведомление отправляется только при первом пересечении порога
+	// Определяем направление изменения уровня заряда
+	var currentDirection int
 	if m.lastLevel != -1 {
-		// Проверяем, пересекли ли мы порог (были выше, стали на пороге или ниже)
-		if m.lastLevel > m.config.MinThreshold && level <= m.config.MinThreshold {
-			// Критический уровень достигнут впервые
+		if level > m.lastLevel {
+			currentDirection = 1 // Рост уровня
+		} else if level < m.lastLevel {
+			currentDirection = -1 // Падение уровня
+		} else {
+			currentDirection = 0 // Нет изменений
+		}
+	}
+
+	// Буферная зона для компенсации задержек системных данных (уведомление на 2% выше порога)
+	bufferThreshold := m.config.MinThreshold + 2
+
+	// Уведомление отправляется только при первом пересечении порога с учетом направления и буферной зоны
+	if m.lastLevel != -1 {
+		// Проверяем, пересекли ли мы буферный порог (были выше буферного, стали ниже основного порога) только при падении уровня
+		if m.lastLevel > bufferThreshold && level <= m.config.MinThreshold && currentDirection == -1 {
+			// Критический уровень достигнут впервые при разрядке (с компенсацией задержки)
 			message := fmt.Sprintf(
 				"⚠️ КРИТИЧЕСКИЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nПожалуйста, срочно подключите зарядное устройство!",
 				level,
 			)
-			m.log.Info(fmt.Sprintf("🔋 ОТПРАВКА УВЕДОМЛЕНИЯ О РАЗРЯДКЕ: %d%% (порог: %d%%)", level, m.config.MinThreshold))
+			m.log.Info(fmt.Sprintf("🔋 ОТПРАВКА УВЕДОМЛЕНИЯ О РАЗРЯДКЕ: %d%% (порог: %d%%, буфер: %d%%)", level, m.config.MinThreshold, bufferThreshold))
 			m.log.Check(message)
 			if err := dialog.ShowLowBatteryNotification(message, m.log); err != nil {
 				m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о разрядке: %v", err))
@@ -276,7 +291,7 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 				m.log.Info(fmt.Sprintf("✅ Уведомление о разрядке (%d%%) успешно отправлено", level))
 			}
 		} else {
-			m.log.Debug(fmt.Sprintf("Порог не пересечен: lastLevel=%d, level=%d, threshold=%d", m.lastLevel, level, m.config.MinThreshold))
+			m.log.Debug(fmt.Sprintf("Порог не пересечен или направление не падение: lastLevel=%d, level=%d, threshold=%d, buffer=%d, direction=%d", m.lastLevel, level, m.config.MinThreshold, bufferThreshold, currentDirection))
 		}
 		return
 	}
@@ -301,6 +316,8 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 	} else {
 		m.log.Debug(fmt.Sprintf("Условия для уведомления о разрядке не выполнены: level=%d, last=%d", level, m.lastLevel))
 	}
+	// Обновляем направление для следующей итерации
+	m.lastDirection = currentDirection
 }
 
 // checkChargingState проверяет, нужно ли отправлять уведомление при зарядке.
@@ -322,17 +339,32 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 		return
 	}
 
-	// Проверяем, пересекли ли мы порог max_threshold при зарядке
+	// Определяем направление изменения уровня заряда
+	var currentDirection int
+	if m.lastLevel != -1 {
+		if level > m.lastLevel {
+			currentDirection = 1 // Рост уровня
+		} else if level < m.lastLevel {
+			currentDirection = -1 // Падение уровня
+		} else {
+			currentDirection = 0 // Нет изменений
+		}
+	}
+
+	// Буферная зона для компенсации задержек системных данных (уведомление на 2% ниже порога)
+	bufferThreshold := m.config.MaxThreshold - 2
+
+	// Проверяем, пересекли ли мы порог max_threshold при зарядке с учетом направления и буферной зоны
 	// Уведомление отправляется только при первом пересечении порога
 	if m.lastLevel != -1 {
-		// Проверяем, пересекли ли мы порог (были ниже, стали на пороге или выше)
-		if m.lastLevel < m.config.MaxThreshold && level >= m.config.MaxThreshold {
-			// Максимальный уровень достигнут впервые
+		// Проверяем, пересекли ли мы буферный порог (были ниже буферного, стали выше основного порога) только при росте уровня
+		if m.lastLevel < bufferThreshold && level >= m.config.MaxThreshold && currentDirection == 1 {
+			// Максимальный уровень достигнут впервые при зарядке (с компенсацией задержки)
 			message := fmt.Sprintf(
 				"⚡ МАКСИМАЛЬНЫЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nРекомендуется отключить зарядное устройство для продления срока службы батареи.",
 				level,
 			)
-			m.log.Info(fmt.Sprintf("🔌 ОТПРАВКА УВЕДОМЛЕНИЯ О ЗАРЯДКЕ: %d%% (порог: %d%%)", level, m.config.MaxThreshold))
+			m.log.Info(fmt.Sprintf("🔌 ОТПРАВКА УВЕДОМЛЕНИЯ О ЗАРЯДКЕ: %d%% (порог: %d%%, буфер: %d%%)", level, m.config.MaxThreshold, bufferThreshold))
 			m.log.Check(message)
 			if err := dialog.ShowHighBatteryNotification(message, m.log); err != nil {
 				m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о зарядке: %v", err))
@@ -340,7 +372,7 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 				m.log.Info(fmt.Sprintf("✅ Уведомление о зарядке (%d%%) успешно отправлено", level))
 			}
 		} else {
-			m.log.Debug(fmt.Sprintf("Порог не пересечен: lastLevel=%d, level=%d, threshold=%d", m.lastLevel, level, m.config.MaxThreshold))
+			m.log.Debug(fmt.Sprintf("Порог не пересечен или направление не рост: lastLevel=%d, level=%d, threshold=%d, buffer=%d, direction=%d", m.lastLevel, level, m.config.MaxThreshold, bufferThreshold, currentDirection))
 		}
 		return
 	}
@@ -365,6 +397,8 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 	} else {
 		m.log.Debug(fmt.Sprintf("Условия для уведомления о зарядке не выполнены: level=%d, last=%d", level, m.lastLevel))
 	}
+	// Обновляем направление для следующей итерации
+	m.lastDirection = currentDirection
 }
 
 // Stop останавливает работу монитора.

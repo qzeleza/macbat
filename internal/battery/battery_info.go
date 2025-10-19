@@ -21,6 +21,7 @@ import (
 typedef struct {
     int currentCapacity;
     int maxCapacity;
+    int rawMaxCapacity;
     int designCapacity;
     int cycleCount;
     int voltage;
