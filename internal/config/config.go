@@ -37,6 +37,7 @@ type Config struct {
 	LogRotationLines             int    `json:"log_rotation_lines"`         // Количество строк в файле логов
 	LogEnabled                   bool   `json:"log_enabled"`                // Включить логирование
 	RunAtLoad                    bool   `json:"run_at_load"`                // Запускать ли агент при входе в систему
+	BrightnessControlEnabled     bool   `json:"brightness_control_enabled"` // Включить регулировку яркости
 }
 
 // Manager инкапсулирует всю логику управления конфигурацией.
@@ -79,8 +80,8 @@ func Default() *Config {
 		MaxThreshold:                 81,
 		LogFilePath:                  paths.LogPath(),
 		LogRotationLines:             1000,
-		CheckIntervalWhenCharging:    15,   // 15 секунд — частые обновления при зарядке
-		CheckIntervalWhenDischarging: 15,   // 15 секунд — частые обновления при разрядке
+		CheckIntervalWhenCharging:    15, // 15 секунд — частые обновления при зарядке
+		CheckIntervalWhenDischarging: 15, // 15 секунд — частые обновления при разрядке
 		LogEnabled:                   true,
 		RunAtLoad:                    true,
 		DebugEnabled:                 false,

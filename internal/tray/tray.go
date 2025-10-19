@@ -25,25 +25,26 @@ import (
 
 // Tray управляет иконкой и меню в системном трее.
 type Tray struct {
-	log               *logger.Logger      // Логгер
-	cfg               *config.Config      // Конфигурация
-	cfgManager        *config.Manager     // Менеджер конфигурации
-	bgManager         *background.Manager // Менеджер бэкграунда
-	mChargeMode       *systray.MenuItem   // Пункт "Режим зарядки"
-	mCurrent          *systray.MenuItem   // Пункт "Текущий заряд"
-	mMin              *systray.MenuItem   // Пункт "Минимальный порог"
-	mMax              *systray.MenuItem   // Пункт "Максимальный порог"
-	mCycles           *systray.MenuItem   // Пункт "Циклы заряда"
-	mHealth           *systray.MenuItem   // Пункт "Здоровье батареи"
-	mCheckCharging    *systray.MenuItem   // Пункт "Интервал проверки (зарядка)"
-	mCheckDischarging *systray.MenuItem   // Пункт "Интервал проверки (разрядка)"
-	mSettings         *systray.MenuItem   // Пункт "Настройки"
-	mConfig           *systray.MenuItem   // Пункт "Открыть config.json"
-	mLogs             *systray.MenuItem   // Пункт "Открыть macbat.log"
-	timeToFullCharge  *systray.MenuItem   // Пункт "Время до полной зарядки"
-	timeToEmptyCharge *systray.MenuItem   // Пункт "Время до полной разрядки"
-	mVersion          *systray.MenuItem   // Пункт "Версия"
-	updateMu          sync.Mutex          // Мьютекс для защиты обновления меню
+	log                *logger.Logger      // Логгер
+	cfg                *config.Config      // Конфигурация
+	cfgManager         *config.Manager     // Менеджер конфигурации
+	bgManager          *background.Manager // Менеджер бэкграунда
+	mChargeMode        *systray.MenuItem   // Пункт "Режим зарядки"
+	mCurrent           *systray.MenuItem   // Пункт "Текущий заряд"
+	mMin               *systray.MenuItem   // Пункт "Минимальный порог"
+	mMax               *systray.MenuItem   // Пункт "Максимальный порог"
+	mCycles            *systray.MenuItem   // Пункт "Циклы заряда"
+	mHealth            *systray.MenuItem   // Пункт "Здоровье батареи"
+	mCheckCharging     *systray.MenuItem   // Пункт "Интервал проверки (зарядка)"
+	mCheckDischarging  *systray.MenuItem   // Пункт "Интервал проверки (разрядка)"
+	mSettings          *systray.MenuItem   // Пункт "Настройки"
+	mConfig            *systray.MenuItem   // Пункт "Открыть config.json"
+	mLogs              *systray.MenuItem   // Пункт "Открыть macbat.log"
+	timeToFullCharge   *systray.MenuItem   // Пункт "Время до полной зарядки"
+	timeToEmptyCharge  *systray.MenuItem   // Пункт "Время до полной разрядки"
+	mVersion           *systray.MenuItem   // Пункт "Версия"
+	mBrightnessControl *systray.MenuItem   // Пункт "Регулировка яркости"
+	updateMu           sync.Mutex          // Мьютекс для защиты обновления меню
 }
 
 const (
@@ -112,6 +113,10 @@ func (t *Tray) onReady() {
 	t.mSettings = systray.AddMenuItem("Пороговые интервалы", "")
 	t.mCheckCharging = t.mSettings.AddSubMenuItem("Интервал проверки при зарядке", "Установка интервала проверки, когда батарея заряжается")
 	t.mCheckDischarging = t.mSettings.AddSubMenuItem("Интервал проверки при разрядке", "Установка интервала проверки, когда батарея разряжается")
+
+	// --- Подменю настроек дисплея ---
+	t.mSettings = systray.AddMenuItem("Настройки дисплея", "")
+	t.mBrightnessControl = t.mSettings.AddSubMenuItem("Регулировка яркости", "Включить/отключить автоматическую регулировку яркости экрана")
 
 	// --- Подменю настроек и журнала ---
 	t.mSettings = systray.AddMenuItem("Настройки и журнал", "Не рекомендуется открывать, если не уверены в своих действиях.")
@@ -243,6 +248,13 @@ func (t *Tray) updateMenu() {
 	// Обновляем пункты меню
 	t.mCheckCharging.SetTitle(fmt.Sprintf("%-36s %4d сек.", "Интервал проверки при зарядке", t.cfg.CheckIntervalWhenCharging))
 	t.mCheckDischarging.SetTitle(fmt.Sprintf("%-35s %4d сек.", "Интервал проверки при разрядке", t.cfg.CheckIntervalWhenDischarging))
+
+	// Обновляем пункт регулировки яркости
+	if t.cfg.BrightnessControlEnabled {
+		t.mBrightnessControl.SetTitle("Регулировка яркости: Включена")
+	} else {
+		t.mBrightnessControl.SetTitle("Регулировка яркости: Выключена")
+	}
 }
 
 // getChargeModeStr возвращает строку и иконку режима питания.
@@ -378,16 +390,24 @@ func (t *Tray) handleMenuClicks(mSettings, mLogs, mConfig, mQuit *systray.MenuIt
 				dlgs.Error("Ошибка", "Не удалось открыть файл конфигурации.")
 			}
 
-		// --- Выбрали пункт "Текущий заряд" ---
-		// case <-t.mCurrent.ClickedCh:
-		// 	// dlgs.Info("Информация", fmt.Sprintf("Сейчас %s", utils.ExtractMenuItemText(strings.ToLower(t.mCurrent.String()))))
-		// 	dlgs.Info("Информация", fmt.Sprintf("Сейчас %s", strings.ToLower(t.mCurrent.String())))
-
-		// // --- Выбрали пункт "Режим зарядки" ---
-		// case <-t.mChargeMode.ClickedCh:
-		// 	// dlgs.Info("Информация", fmt.Sprintf("Сейчас %s", utils.ExtractMenuItemText(strings.ToLower(t.mChargeMode.String()))))
-		// 	dlgs.Info("Информация", fmt.Sprintf("Сейчас %s", strings.ToLower(t.mChargeMode.String())))
-
+		// --- Выбрали пункт "Регулировка яркости" ---
+		case <-t.mBrightnessControl.ClickedCh:
+			if t.cfg.BrightnessControlEnabled {
+				t.cfg.BrightnessControlEnabled = false
+				t.mBrightnessControl.SetTitle("Регулировка яркости: Выключена")
+				t.log.Info("Регулировка яркости отключена пользователем")
+			} else {
+				t.cfg.BrightnessControlEnabled = true
+				t.mBrightnessControl.SetTitle("Регулировка яркости: Включена")
+				t.log.Info("Регулировка яркости включена пользователем")
+			}
+			if err := t.cfgManager.Save(t.cfg); err != nil {
+				dlgs.Error("Ошибка сохранения", "Не удалось сохранить конфигурацию: "+err.Error())
+				t.log.Error("Ошибка сохранения конфигурации: " + err.Error())
+			} else {
+				t.log.Info("Настройки регулировки яркости сохранены")
+				t.restartBackgroundProcess()
+			}
 		// --- Выбрали пункт "Версия" ---
 		case <-t.mVersion.ClickedCh:
 			dlgs.Info("Информация", fmt.Sprintf("Текущая версия приложения macbat: %s", version.Version))

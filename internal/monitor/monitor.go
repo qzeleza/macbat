@@ -39,6 +39,9 @@ package monitor
 
 import (
 	"fmt"
+	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/qzeleza/macbat/internal/battery"
@@ -61,6 +64,7 @@ type Monitor struct {
 	lastLevel         int             // Последний известный уровень заряда для оптимизации.
 	lastDirection     int             // Направление изменения уровня: -1 (падение), 0 (нет изменений), 1 (рост).
 	stopChan          chan struct{}
+	lastBrightness    int // Последняя известная яркость экрана
 }
 
 const (
@@ -215,6 +219,30 @@ func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 		m.checkDischargingState(now, info)
 	}
 
+	// Логика управления яркостью экрана (только если включена в настройках)
+	if m.config.BrightnessControlEnabled {
+		// Сохраняем яркость при подключении зарядки
+		if !m.lastKnownCharging && info.IsCharging && m.isInitialized {
+			brightness, err := getCurrentBrightness()
+			if err == nil {
+				m.lastBrightness = brightness
+				m.log.Info(fmt.Sprintf("Яркость сохранена при подключении зарядки: %d%%", brightness))
+			} else {
+				m.log.Error(fmt.Sprintf("Ошибка получения яркости при подключении зарядки: %v", err))
+			}
+		}
+
+		// Восстанавливаем яркость при отключении зарядки
+		if m.lastKnownCharging && !info.IsCharging && m.lastBrightness > 0 {
+			err := setBrightness(m.lastBrightness)
+			if err == nil {
+				m.log.Info(fmt.Sprintf("Яркость восстановлена при отключении зарядки: %d%%", m.lastBrightness))
+			} else {
+				m.log.Error(fmt.Sprintf("Ошибка установки яркости при отключении зарядки: %v", err))
+			}
+		}
+	}
+
 	// ТЕПЕРЬ запоминаем текущий уровень заряда ПОСЛЕ проверки порогов
 	m.lastLevel = info.CurrentCapacity
 
@@ -236,6 +264,7 @@ func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 func (m *Monitor) resetState(newChargingState bool) {
 	m.lastKnownCharging = newChargingState
 	m.lastLevel = -1
+	m.lastBrightness = 0 // Сбрасываем сохраненную яркость при смене режима
 }
 
 // checkDischargingState проверяет, нужно ли отправлять уведомление при разрядке.
@@ -407,4 +436,33 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 func (m *Monitor) Stop() {
 	m.log.Info("Остановка монитора...")
 	close(m.stopChan)
+}
+
+// getCurrentBrightness получает текущую яркость экрана (0-100)
+//
+// @return Текущая яркость экрана (0-100).
+func getCurrentBrightness() (int, error) {
+	cmd := exec.Command("osascript", "-e", "tell application \"System Events\" to get brightness of (brightness of (display 1))")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	brightness, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		return 0, err
+	}
+	return brightness, nil
+}
+
+// setBrightness устанавливает яркость экрана (0-100)
+//
+// @param brightness Яркость экрана (0-100).
+//
+// @return Ничего.
+func setBrightness(brightness int) error {
+	if brightness < 0 || brightness > 100 {
+		return fmt.Errorf("яркость должна быть в диапазоне 0-100")
+	}
+	cmd := exec.Command("osascript", "-e", fmt.Sprintf("tell application \"System Events\" to set brightness of (brightness of (display 1)) to %d", brightness))
+	return cmd.Run()
 }
