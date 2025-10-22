@@ -222,7 +222,7 @@ func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 	// Логика управления яркостью экрана (только если включена в настройках)
 	if m.config.BrightnessControlEnabled {
 		// Сохраняем яркость при подключении зарядки
-		if !m.lastKnownCharging && info.IsCharging && m.isInitialized {
+		if !m.lastKnownCharging && info.IsCharging {
 			brightness, err := getCurrentBrightness()
 			if err == nil {
 				m.lastBrightness = brightness
@@ -264,7 +264,9 @@ func (m *Monitor) Check(now time.Time, info battery.BatteryInfo) {
 func (m *Monitor) resetState(newChargingState bool) {
 	m.lastKnownCharging = newChargingState
 	m.lastLevel = -1
-	m.lastBrightness = 0 // Сбрасываем сохраненную яркость при смене режима
+	if !newChargingState {
+		m.lastBrightness = 0 // Обнуляем яркость после восстановления при отключении зарядки
+	}
 }
 
 // checkDischargingState проверяет, нужно ли отправлять уведомление при разрядке.
