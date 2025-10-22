@@ -300,19 +300,16 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 		}
 	}
 
-	// Буферная зона для компенсации задержек системных данных (уведомление на 2% выше порога)
-	bufferThreshold := m.config.MinThreshold + 2
-
-	// Уведомление отправляется только при первом пересечении порога с учетом направления и буферной зоны
+	// Уведомление отправляется только при первом пересечении порога с учетом направления изменения
 	if m.lastLevel != -1 {
-		// Проверяем, пересекли ли мы буферный порог (были выше буферного, стали ниже основного порога) только при падении уровня
-		if m.lastLevel > bufferThreshold && level <= m.config.MinThreshold && currentDirection == -1 {
-			// Критический уровень достигнут впервые при разрядке (с компенсацией задержки)
+		crossedThreshold := m.lastLevel > m.config.MinThreshold && level <= m.config.MinThreshold
+		if crossedThreshold && currentDirection == -1 {
+			// Критический уровень достигнут впервые при разрядке
 			message := fmt.Sprintf(
 				"⚠️ КРИТИЧЕСКИЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nПожалуйста, срочно подключите зарядное устройство!",
 				level,
 			)
-			m.log.Info(fmt.Sprintf("🔋 ОТПРАВКА УВЕДОМЛЕНИЯ О РАЗРЯДКЕ: %d%% (порог: %d%%, буфер: %d%%)", level, m.config.MinThreshold, bufferThreshold))
+			m.log.Info(fmt.Sprintf("🔋 ОТПРАВКА УВЕДОМЛЕНИЯ О РАЗРЯДКЕ: %d%% (порог: %d%%)", level, m.config.MinThreshold))
 			m.log.Check(message)
 			if err := dialog.ShowLowBatteryNotification(message, m.log); err != nil {
 				m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о разрядке: %v", err))
@@ -320,8 +317,9 @@ func (m *Monitor) checkDischargingState(now time.Time, info battery.BatteryInfo)
 				m.log.Info(fmt.Sprintf("✅ Уведомление о разрядке (%d%%) успешно отправлено", level))
 			}
 		} else {
-			m.log.Debug(fmt.Sprintf("Порог не пересечен или направление не падение: lastLevel=%d, level=%d, threshold=%d, buffer=%d, direction=%d", m.lastLevel, level, m.config.MinThreshold, bufferThreshold, currentDirection))
+			m.log.Debug(fmt.Sprintf("Порог не пересечен или направление не падение: lastLevel=%d, level=%d, threshold=%d, direction=%d", m.lastLevel, level, m.config.MinThreshold, currentDirection))
 		}
+		m.lastDirection = currentDirection
 		return
 	}
 
@@ -380,20 +378,17 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 		}
 	}
 
-	// Буферная зона для компенсации задержек системных данных (уведомление на 2% ниже порога)
-	bufferThreshold := m.config.MaxThreshold - 2
-
-	// Проверяем, пересекли ли мы порог max_threshold при зарядке с учетом направления и буферной зоны
+	// Проверяем, пересекли ли мы порог max_threshold при зарядке с учетом направления изменения
 	// Уведомление отправляется только при первом пересечении порога
 	if m.lastLevel != -1 {
-		// Проверяем, пересекли ли мы буферный порог (были ниже буферного, стали выше основного порога) только при росте уровня
-		if m.lastLevel < bufferThreshold && level >= m.config.MaxThreshold && currentDirection == 1 {
-			// Максимальный уровень достигнут впервые при зарядке (с компенсацией задержки)
+		crossedThreshold := m.lastLevel < m.config.MaxThreshold && level >= m.config.MaxThreshold
+		if crossedThreshold && currentDirection == 1 {
+			// Максимальный уровень достигнут впервые при зарядке
 			message := fmt.Sprintf(
 				"⚡ МАКСИМАЛЬНЫЙ УРОВЕНЬ ЗАРЯДА: %d%%\n\nРекомендуется отключить зарядное устройство для продления срока службы батареи.",
 				level,
 			)
-			m.log.Info(fmt.Sprintf("🔌 ОТПРАВКА УВЕДОМЛЕНИЯ О ЗАРЯДКЕ: %d%% (порог: %d%%, буфер: %d%%)", level, m.config.MaxThreshold, bufferThreshold))
+			m.log.Info(fmt.Sprintf("🔌 ОТПРАВКА УВЕДОМЛЕНИЯ О ЗАРЯДКЕ: %d%% (порог: %d%%)", level, m.config.MaxThreshold))
 			m.log.Check(message)
 			if err := dialog.ShowHighBatteryNotification(message, m.log); err != nil {
 				m.log.Error(fmt.Sprintf("Ошибка отправки уведомления о зарядке: %v", err))
@@ -401,8 +396,9 @@ func (m *Monitor) checkChargingState(now time.Time, info battery.BatteryInfo) {
 				m.log.Info(fmt.Sprintf("✅ Уведомление о зарядке (%d%%) успешно отправлено", level))
 			}
 		} else {
-			m.log.Debug(fmt.Sprintf("Порог не пересечен или направление не рост: lastLevel=%d, level=%d, threshold=%d, buffer=%d, direction=%d", m.lastLevel, level, m.config.MaxThreshold, bufferThreshold, currentDirection))
+			m.log.Debug(fmt.Sprintf("Порог не пересечен или направление не рост: lastLevel=%d, level=%d, threshold=%d, direction=%d", m.lastLevel, level, m.config.MaxThreshold, currentDirection))
 		}
+		m.lastDirection = currentDirection
 		return
 	}
 
